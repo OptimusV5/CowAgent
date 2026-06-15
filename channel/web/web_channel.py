@@ -1604,9 +1604,9 @@ class ConfigHandler:
     EDITABLE_KEYS = {
         "cow_lang",
         "model", "bot_type", "use_linkai",
-        "open_ai_api_base", "deepseek_api_base", "qianfan_api_base", "claude_api_base", "gemini_api_base",
+        "open_ai_api_base", "voice_to_text_api_base", "deepseek_api_base", "qianfan_api_base", "claude_api_base", "gemini_api_base",
         "zhipu_ai_api_base", "moonshot_base_url", "ark_base_url", "custom_api_base", "mimo_api_base",
-        "open_ai_api_key", "deepseek_api_key", "qianfan_api_key", "claude_api_key", "gemini_api_key",
+        "open_ai_api_key", "voice_to_text_api_key", "deepseek_api_key", "qianfan_api_key", "claude_api_key", "gemini_api_key",
         "zhipu_ai_api_key", "dashscope_api_key", "moonshot_api_key",
         "ark_api_key", "minimax_api_key", "linkai_api_key", "custom_api_key", "mimo_api_key",
         "custom_providers",
@@ -2459,9 +2459,16 @@ class ModelsHandler:
         # the bridge auto-picker would land on (purely a UX hint, NOT
         # persisted). Once the user saves a vendor, we lock onto it.
         explicit = (local_config.get("voice_to_text") or "").strip().lower()
+        asr_openai_key = local_config.get("voice_to_text_api_key", "")
+        asr_openai_base = local_config.get("voice_to_text_api_base", "")
+        asr_openai_configured = cls._is_real_key(asr_openai_key)
+        openai_meta = ConfigHandler.PROVIDER_MODELS.get("openai") or {}
         suggested = ""
         if not explicit:
             for pid in cls._ASR_PROVIDERS:
+                if pid == "openai" and asr_openai_configured:
+                    suggested = pid
+                    break
                 meta = ConfigHandler.PROVIDER_MODELS.get(pid) or {}
                 key_field = meta.get("api_key_field")
                 if key_field and cls._is_real_key(local_config.get(key_field, "")):
@@ -2474,6 +2481,19 @@ class ModelsHandler:
             "current_model": (local_config.get("voice_to_text_model") or "") if explicit else "",
             "providers": cls._ASR_PROVIDERS,
             "provider_models": cls._ASR_PROVIDER_MODELS,
+            "provider_overrides": {
+                "openai": {
+                    "configured": asr_openai_configured,
+                    "api_key_masked": ConfigHandler._mask_key(asr_openai_key) if asr_openai_configured else "",
+                    "api_base": asr_openai_base or "",
+                    "api_base_default": (
+                        local_config.get("open_ai_api_base")
+                        or openai_meta.get("api_base_default")
+                        or "https://api.openai.com/v1"
+                    ),
+                    "api_base_placeholder": openai_meta.get("api_base_placeholder") or ConfigHandler._PLACEHOLDER_V1,
+                },
+            },
         }
 
     @classmethod
@@ -3015,7 +3035,7 @@ class ModelsHandler:
         if capability == "vision":
             return self._set_vision(provider_id, model)
         if capability == "asr":
-            return self._set_asr(provider_id, model)
+            return self._set_asr(provider_id, model, data)
         if capability == "tts":
             return self._set_tts(provider_id, model, (data.get("voice") or "").strip())
         if capability == "embedding":
@@ -3190,7 +3210,8 @@ class ModelsHandler:
             self._refresh_voice_routing()
         return json.dumps({"status": "success", key: value})
 
-    def _set_asr(self, provider_id: str, model: str) -> str:
+    def _set_asr(self, provider_id: str, model: str, data: dict = None) -> str:
+        data = data or {}
         local_config = conf()
         file_cfg = self._read_file_config()
         local_config["voice_to_text"] = provider_id
@@ -3202,6 +3223,27 @@ class ModelsHandler:
         if model:
             local_config["voice_to_text_model"] = model
             file_cfg["voice_to_text_model"] = model
+        if provider_id == "openai":
+            base_present = "asr_api_base" in data or "voice_to_text_api_base" in data
+            if base_present:
+                api_base = (data.get("asr_api_base")
+                            if "asr_api_base" in data
+                            else data.get("voice_to_text_api_base"))
+                api_base = (api_base or "").strip()
+                local_config["voice_to_text_api_base"] = api_base
+                file_cfg["voice_to_text_api_base"] = api_base
+
+            clear_key = bool(data.get("asr_api_key_clear") or data.get("voice_to_text_api_key_clear"))
+            key_present = "asr_api_key" in data or "voice_to_text_api_key" in data
+            if clear_key or key_present:
+                api_key = "" if clear_key else (
+                    data.get("asr_api_key")
+                    if "asr_api_key" in data
+                    else data.get("voice_to_text_api_key")
+                )
+                api_key = (api_key or "").strip()
+                local_config["voice_to_text_api_key"] = api_key
+                file_cfg["voice_to_text_api_key"] = api_key
         self._write_file_config(file_cfg)
         logger.info(
             f"[ModelsHandler] asr updated: provider={provider_id!r} "

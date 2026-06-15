@@ -21,10 +21,15 @@ class OpenaiVoice(Voice):
         logger.debug("[Openai] voice file name={}".format(voice_file))
         try:
             file = open(voice_file, "rb")
-            api_base = conf().get("open_ai_api_base") or "https://api.openai.com/v1"
+            api_key = conf().get("voice_to_text_api_key") or conf().get("open_ai_api_key")
+            api_base = (
+                conf().get("voice_to_text_api_base")
+                or conf().get("open_ai_api_base")
+                or "https://api.openai.com/v1"
+            )
             url = f'{api_base}/audio/transcriptions'
             headers = {
-                'Authorization': 'Bearer ' + conf().get("open_ai_api_key"),
+                'Authorization': 'Bearer ' + api_key,
                 # 'Content-Type': 'multipart/form-data' # 加了会报错，不知道什么原因
             }
             files = {
@@ -49,8 +54,7 @@ class OpenaiVoice(Voice):
         except Exception as e:
             logger.error(f"[Openai] voiceToText exception: {e}", exc_info=True)
             reply = Reply(ReplyType.ERROR, "我暂时还无法听清您的语音，请稍后再试吧~")
-        finally:
-            return reply
+        return reply
 
 
     def textToVoice(self, text):

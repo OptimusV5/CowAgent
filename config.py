@@ -120,6 +120,8 @@ available_setting = {
     "voice_reply_voice": False,  # whether to reply to voice with voice; requires the matching TTS engine api key
     "always_reply_voice": False,  # whether to always reply with voice
     "voice_to_text": "openai",  # speech recognition engine: openai,baidu,google,azure,xunfei,ali
+    "voice_to_text_api_key": "",  # optional ASR-specific OpenAI-compatible api key; falls back to open_ai_api_key
+    "voice_to_text_api_base": "",  # optional ASR-specific OpenAI-compatible api base; falls back to open_ai_api_base
     "text_to_voice": "openai",  # TTS engine: openai,baidu,google,azure,xunfei,ali,pytts(offline),elevenlabs,edge(online)
     "text_to_voice_model": "tts-1",
     "tts_voice_id": "alloy",
@@ -446,6 +448,8 @@ def load_config():
     _CONFIG_TO_ENV = {
         "open_ai_api_key": "OPENAI_API_KEY",
         "open_ai_api_base": "OPENAI_API_BASE",
+        "voice_to_text_api_key": "VOICE_TO_TEXT_API_KEY",
+        "voice_to_text_api_base": "VOICE_TO_TEXT_API_BASE",
         "linkai_api_key": "LINKAI_API_KEY",
         "linkai_api_base": "LINKAI_API_BASE",
         "claude_api_key": "CLAUDE_API_KEY",
