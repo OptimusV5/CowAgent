@@ -205,6 +205,57 @@ class FeishuMessage(ChatMessage):
                 except Exception as e:
                     logger.error(f"[FeiShu] Exception downloading audio, key={file_key}: {e}", exc_info=True)
             self._prepare_fn = _download_audio
+        elif msg_type == "media":
+            # 飞书视频消息类型为 media。这里按文件消息下载并缓存，但标记为 video，
+            # 后续文本消息会自动附加为 [视频: path]，交由 Agent/工具层解析。
+            self.ctype = ContextType.FILE
+            self.file_type = "video"
+            content = json.loads(msg.get("content"))
+            file_key = content.get("file_key")
+            file_name = content.get("file_name") or f"{file_key}.mp4"
+            suffix = utils.get_path_suffix(file_name) or "mp4"
+
+            workspace_root = expand_path(conf().get("agent_workspace", "~/cow"))
+            tmp_dir = os.path.join(workspace_root, "tmp")
+            os.makedirs(tmp_dir, exist_ok=True)
+            self.content = os.path.join(tmp_dir, f"{file_key}.{suffix}")
+            logger.info(f"[FeiShu] media message: file_key={file_key}, save_path={self.content}")
+
+            def _download_media():
+                logger.info(f"[FeiShu] downloading media: file_key={file_key}, msg_id={self.msg_id}")
+                url = f"https://open.feishu.cn/open-apis/im/v1/messages/{self.msg_id}/resources/{file_key}"
+                headers = {
+                    "Authorization": "Bearer " + access_token,
+                }
+
+                last_response = None
+                try:
+                    for resource_type in ("file", "media"):
+                        response = requests.get(
+                            url=url,
+                            headers=headers,
+                            params={"type": resource_type},
+                        )
+                        last_response = response
+                        logger.info(
+                            f"[FeiShu] download media response: type={resource_type}, "
+                            f"status={response.status_code}, size={len(response.content)} bytes"
+                        )
+                        if response.status_code == 200:
+                            with open(self.content, "wb") as f:
+                                f.write(response.content)
+                            logger.info(f"[FeiShu] media saved to: {self.content}")
+                            return
+
+                    res_text = last_response.text if last_response is not None else ""
+                    status_code = last_response.status_code if last_response is not None else "unknown"
+                    logger.error(
+                        f"[FeiShu] Failed to download media, key={file_key}, "
+                        f"status={status_code}, res={res_text}"
+                    )
+                except Exception as e:
+                    logger.error(f"[FeiShu] Exception downloading media, key={file_key}: {e}", exc_info=True)
+            self._prepare_fn = _download_media
         else:
             raise NotImplementedError("Unsupported message type: Type:{} ".format(msg_type))
 

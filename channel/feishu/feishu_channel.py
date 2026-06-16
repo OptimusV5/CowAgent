@@ -564,8 +564,9 @@ class FeiShuChanel(ChatChannel):
                 except Exception:
                     pass
                 return
-            file_cache.add(session_id, feishu_msg.content, file_type='file')
-            logger.info(f"[FeiShu] File cached for session {session_id}: {feishu_msg.content}")
+            cached_file_type = getattr(feishu_msg, "file_type", "file")
+            file_cache.add(session_id, feishu_msg.content, file_type=cached_file_type)
+            logger.info(f"[FeiShu] {cached_file_type.capitalize()} cached for session {session_id}: {feishu_msg.content}")
             return
 
         # 如果是文本消息，检查是否有缓存的文件
