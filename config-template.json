@@ -43,5 +43,13 @@
   "enable_thinking": false,
   "reasoning_effort": "high",
   "knowledge": true,
-  "self_evolution_enabled": true
+  "self_evolution_enabled": true,
+  "tools": {
+    "video_parse": {
+      "model": "gemini-2.5-flash",
+      "keep_temp": false,
+      "delete_source_on_success": true,
+      "delete_remote_file": true
+    }
+  }
 }

@@ -10,6 +10,7 @@ from agent.tools.bash.bash import Bash
 from agent.tools.ls.ls import Ls
 from agent.tools.send.send import Send
 from agent.tools.audio_transcribe.audio_transcribe import AudioTranscribe
+from agent.tools.video_parse.video_parse import VideoParseTool
 
 # Import memory tools
 from agent.tools.memory.memory_search import MemorySearchTool
@@ -138,6 +139,7 @@ __all__ = [
     'Ls',
     'Send',
     'AudioTranscribe',
+    'VideoParseTool',
     'MemorySearchTool',
     'MemoryGetTool',
     'EvolutionUndoTool',
