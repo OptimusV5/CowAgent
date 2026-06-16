@@ -1145,6 +1145,7 @@ class WebChannel(ChatChannel):
             '/config', 'ConfigHandler',
             '/api/models', 'ModelsHandler',
             '/api/browser', 'BrowserConfigHandler',
+            '/api/video-parse', 'VideoParseConfigHandler',
             '/api/channels', 'ChannelsHandler',
             '/api/weixin/qrlogin', 'WeixinQrHandler',
             '/api/feishu/register', 'FeishuRegisterHandler',
@@ -3578,6 +3579,224 @@ class BrowserConfigHandler:
             return json.dumps({"status": "success", "config": self._public_config(cfg)}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[BrowserConfig] POST failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class VideoParseConfigHandler:
+    """API for video_parse tool configuration and local dependency checks."""
+
+    @staticmethod
+    def _default_config() -> dict:
+        return {
+            "api_key": "",
+            "api_base": "https://generativelanguage.googleapis.com",
+            "upload_api_base": "https://generativelanguage.googleapis.com",
+            "model": "gemini-2.5-flash",
+            "prompt": (
+                "请用中文总结这个视频，返回 JSON。字段包括：summary、main_points、timeline、"
+                "spoken_content、visual_content、on_screen_text、uncertainties。不要输出 Markdown。"
+            ),
+            "download_timeout": 600,
+            "ffmpeg_timeout": 300,
+            "gemini_timeout": 600,
+            "processing_timeout": 300,
+            "max_video_bytes": 2 * 1024 * 1024 * 1024,
+            "temp_dir": "",
+            "keep_temp": False,
+            "delete_source_on_success": True,
+            "delete_remote_file": True,
+            "prefer_json": True,
+        }
+
+    @classmethod
+    def _merge_defaults(cls, cfg: dict = None) -> dict:
+        base = cls._default_config()
+        if isinstance(cfg, dict):
+            for key, value in cfg.items():
+                if key in base:
+                    base[key] = value
+        return base
+
+    @classmethod
+    def _current_config(cls) -> dict:
+        tools = conf().get("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+        cfg = tools.get("video_parse") if isinstance(tools.get("video_parse"), dict) else {}
+        return cls._merge_defaults(cfg)
+
+    @classmethod
+    def _merge_with_current(cls, incoming: dict = None) -> dict:
+        cfg = cls._current_config()
+        if isinstance(incoming, dict):
+            for key, value in incoming.items():
+                if key in cfg:
+                    cfg[key] = value
+        return cls._merge_defaults(cfg)
+
+    @classmethod
+    def _config_path(cls) -> str:
+        return ModelsHandler._config_path()
+
+    @classmethod
+    def _read_file_config(cls) -> dict:
+        path = cls._config_path()
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @classmethod
+    def _write_file_config(cls, data: dict) -> None:
+        with open(cls._config_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    @staticmethod
+    def _mask_key(value: str) -> str:
+        return ConfigHandler._mask_key(value or "")
+
+    @staticmethod
+    def _bool_value(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+    @staticmethod
+    def _int_value(value, default: int) -> int:
+        try:
+            if value is None or value == "":
+                return default
+            return int(value)
+        except Exception:
+            return default
+
+    @classmethod
+    def _normalize_config(cls, cfg: dict) -> dict:
+        defaults = cls._default_config()
+        normalized = cls._merge_defaults(cfg)
+        for key in ("download_timeout", "ffmpeg_timeout", "gemini_timeout", "processing_timeout", "max_video_bytes"):
+            normalized[key] = max(0, cls._int_value(normalized.get(key), defaults[key]))
+        for key in ("keep_temp", "delete_source_on_success", "delete_remote_file", "prefer_json"):
+            normalized[key] = cls._bool_value(normalized.get(key))
+        for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir"):
+            normalized[key] = str(normalized.get(key) or "").strip()
+        if not normalized["api_base"]:
+            normalized["api_base"] = defaults["api_base"]
+        if not normalized["upload_api_base"]:
+            normalized["upload_api_base"] = normalized["api_base"]
+        if not normalized["model"]:
+            normalized["model"] = defaults["model"]
+        if not normalized["prompt"]:
+            normalized["prompt"] = defaults["prompt"]
+        return normalized
+
+    @classmethod
+    def _resolved_key(cls, cfg: dict) -> tuple:
+        tool_key = (cfg.get("api_key") or "").strip()
+        if tool_key:
+            return tool_key, "tool"
+        env_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+        if env_key:
+            return env_key, "env"
+        global_key = str(conf().get("gemini_api_key", "") or "").strip()
+        if global_key:
+            return global_key, "global"
+        return "", "missing"
+
+    @classmethod
+    def _health(cls, cfg: dict) -> dict:
+        key, source = cls._resolved_key(cfg)
+        return {
+            "you_get": bool(shutil.which("you-get")),
+            "ffmpeg": bool(shutil.which("ffmpeg")),
+            "ffprobe": bool(shutil.which("ffprobe")),
+            "gemini_key": bool(key),
+            "gemini_key_source": source,
+        }
+
+    @classmethod
+    def _public_config(cls, cfg: dict) -> dict:
+        public = dict(cfg)
+        api_key = public.pop("api_key", "") or ""
+        public["api_key_masked"] = cls._mask_key(api_key)
+        public["api_key_configured"] = bool(api_key)
+        return public
+
+    @classmethod
+    def _apply_runtime_config(cls, cfg: dict) -> None:
+        local_config = conf()
+        tools = local_config.get("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+        tools["video_parse"] = cfg
+        local_config["tools"] = tools
+        try:
+            from agent.tools.tool_manager import ToolManager
+            tm = ToolManager()
+            if not hasattr(tm, "tool_configs") or not isinstance(tm.tool_configs, dict):
+                tm.tool_configs = {}
+            tm.tool_configs["video_parse"] = cfg
+            logger.info("[VideoParseConfig] video_parse runtime config refreshed")
+        except Exception as e:
+            logger.warning(f"[VideoParseConfig] runtime refresh failed: {e}")
+
+    def GET(self):
+        _require_auth()
+        web.header("Content-Type", "application/json; charset=utf-8")
+        try:
+            cfg = self._normalize_config(self._current_config())
+            return json.dumps({
+                "status": "success",
+                "config": self._public_config(cfg),
+                "health": self._health(cfg),
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[VideoParseConfig] GET failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+    def POST(self):
+        _require_auth()
+        web.header("Content-Type", "application/json; charset=utf-8")
+        try:
+            data = json.loads(web.data() or b"{}")
+            action = (data.get("action") or "save").strip().lower()
+            incoming = data.get("config") if isinstance(data.get("config"), dict) else {}
+            cfg = self._merge_with_current(incoming)
+            if data.get("api_key_clear") or incoming.get("api_key_clear"):
+                cfg["api_key"] = ""
+            cfg = self._normalize_config(cfg)
+
+            if action == "test":
+                health = self._health(cfg)
+                ok = all(bool(health.get(k)) for k in ("you_get", "ffmpeg", "ffprobe", "gemini_key"))
+                return json.dumps({
+                    "status": "success",
+                    "ok": ok,
+                    "health": health,
+                    "config": self._public_config(cfg),
+                }, ensure_ascii=False)
+
+            if action != "save":
+                return json.dumps({"status": "error", "message": f"unknown action: {action!r}"})
+
+            file_cfg = self._read_file_config()
+            tools = file_cfg.get("tools")
+            if not isinstance(tools, dict):
+                tools = {}
+            tools["video_parse"] = cfg
+            file_cfg["tools"] = tools
+            self._write_file_config(file_cfg)
+            self._apply_runtime_config(cfg)
+            logger.info("[VideoParseConfig] video_parse config saved")
+            return json.dumps({
+                "status": "success",
+                "config": self._public_config(cfg),
+                "health": self._health(cfg),
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[VideoParseConfig] POST failed: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 

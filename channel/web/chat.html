@@ -755,6 +755,165 @@
                                     </div>
                                 </div>
 
+                                <!-- Video Parse Tool Config Card -->
+                                <div class="bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10 p-6">
+                                    <div class="flex items-center gap-3 mb-5">
+                                        <div class="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
+                                            <i class="fas fa-video text-emerald-500 text-sm"></i>
+                                        </div>
+                                        <h3 class="font-semibold text-slate-800 dark:text-slate-100" data-i18n="config_video_parse">视频解析工具</h3>
+                                        <span id="cfg-video-health" class="ml-auto text-xs text-slate-400 dark:text-slate-500"></span>
+                                    </div>
+                                    <div class="space-y-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_api_key">Gemini API Key</label>
+                                            <input id="cfg-video-api-key" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true"
+                                                   class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                          bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                          focus:outline-none focus:border-primary-500 font-mono transition-colors cfg-key-masked"
+                                                   data-masked="1">
+                                        </div>
+                                        <div class="grid md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_api_base">Gemini API Base</label>
+                                                <input id="cfg-video-api-base" type="text"
+                                                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                       placeholder="https://generativelanguage.googleapis.com">
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_model">模型</label>
+                                                <input id="cfg-video-model" type="text"
+                                                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                       placeholder="gemini-2.5-flash">
+                                            </div>
+                                        </div>
+                                        <div class="grid md:grid-cols-2 gap-4">
+                                            <div class="flex items-center justify-between md:justify-start md:gap-3">
+                                                <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_video_delete_source">成功后删除本地视频</span>
+                                                <label class="relative inline-flex items-center cursor-pointer">
+                                                    <input id="cfg-video-delete-source" type="checkbox" class="sr-only peer">
+                                                    <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                </label>
+                                            </div>
+                                            <div class="flex items-center justify-between md:justify-start md:gap-3">
+                                                <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_video_delete_remote">成功后删除远端文件</span>
+                                                <label class="relative inline-flex items-center cursor-pointer">
+                                                    <input id="cfg-video-delete-remote" type="checkbox" class="sr-only peer">
+                                                    <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <details class="group">
+                                            <summary class="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                                                <i class="fas fa-chevron-right text-xs transition-transform group-open:rotate-90"></i>
+                                                <span data-i18n="config_video_advanced">高级配置</span>
+                                            </summary>
+                                            <div class="space-y-4 pt-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_upload_api_base">Upload API Base</label>
+                                                    <input id="cfg-video-upload-api-base" type="text"
+                                                           class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                  focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                           placeholder="https://generativelanguage.googleapis.com">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_prompt">Prompt</label>
+                                                    <textarea id="cfg-video-prompt" rows="4"
+                                                              class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                     bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                     focus:outline-none focus:border-primary-500 transition-colors resize-y"></textarea>
+                                                </div>
+                                                <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_download_timeout">下载超时</label>
+                                                        <input id="cfg-video-download-timeout" type="number" min="0" step="10"
+                                                               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_ffmpeg_timeout">ffmpeg 超时</label>
+                                                        <input id="cfg-video-ffmpeg-timeout" type="number" min="0" step="10"
+                                                               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_gemini_timeout">Gemini 超时</label>
+                                                        <input id="cfg-video-gemini-timeout" type="number" min="0" step="10"
+                                                               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_processing_timeout">处理超时</label>
+                                                        <input id="cfg-video-processing-timeout" type="number" min="0" step="10"
+                                                               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors">
+                                                    </div>
+                                                </div>
+                                                <div class="grid md:grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_max_mb">最大视频大小 MB</label>
+                                                        <input id="cfg-video-max-mb" type="number" min="1" step="1"
+                                                               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_temp_dir">临时目录</label>
+                                                        <input id="cfg-video-temp-dir" type="text"
+                                                               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors">
+                                                    </div>
+                                                </div>
+                                                <div class="grid md:grid-cols-2 gap-4">
+                                                    <div class="flex items-center justify-between md:justify-start md:gap-3">
+                                                        <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_video_keep_temp">保留临时文件</span>
+                                                        <label class="relative inline-flex items-center cursor-pointer">
+                                                            <input id="cfg-video-keep-temp" type="checkbox" class="sr-only peer">
+                                                            <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                        after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                        after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="flex items-center justify-between md:justify-start md:gap-3">
+                                                        <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_video_prefer_json">优先 JSON 输出</span>
+                                                        <label class="relative inline-flex items-center cursor-pointer">
+                                                            <input id="cfg-video-prefer-json" type="checkbox" class="sr-only peer">
+                                                            <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                        after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                        after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </details>
+                                        <div class="flex flex-wrap items-center justify-end gap-3 pt-1">
+                                            <span id="cfg-video-status" class="text-xs text-primary-500 opacity-0 transition-opacity duration-300"></span>
+                                            <button id="cfg-video-test"
+                                                    class="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 text-sm font-medium
+                                                           cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                                                    onclick="testVideoParseConfig()" data-i18n="config_video_test">检查配置</button>
+                                            <button id="cfg-video-save"
+                                                    class="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium
+                                                           cursor-pointer transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    onclick="saveVideoParseConfig()" data-i18n="config_save">保存</button>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Security Config Card -->
                                 <div class="bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10 p-6">
                                     <div class="flex items-center gap-3 mb-5">

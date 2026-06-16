@@ -137,6 +137,30 @@ const I18N = {
         config_browser_stop: '停止',
         config_browser_ok: '连接正常',
         config_browser_failed: '连接失败',
+        config_video_parse: '视频解析工具',
+        config_video_api_key: 'Gemini API Key',
+        config_video_api_base: 'Gemini API Base',
+        config_video_upload_api_base: 'Upload API Base',
+        config_video_model: '模型',
+        config_video_prompt: 'Prompt',
+        config_video_advanced: '高级配置',
+        config_video_download_timeout: '下载超时',
+        config_video_ffmpeg_timeout: 'ffmpeg 超时',
+        config_video_gemini_timeout: 'Gemini 超时',
+        config_video_processing_timeout: '处理超时',
+        config_video_max_mb: '最大视频大小 MB',
+        config_video_temp_dir: '临时目录',
+        config_video_keep_temp: '保留临时文件',
+        config_video_delete_source: '成功后删除本地视频',
+        config_video_delete_remote: '成功后删除远端文件',
+        config_video_prefer_json: '优先 JSON 输出',
+        config_video_test: '检查配置',
+        config_video_ok: '配置正常',
+        config_video_failed: '配置异常',
+        config_video_key_tool: '专用 Key',
+        config_video_key_env: '环境变量 Key',
+        config_video_key_global: '全局 Key',
+        config_video_key_missing: '未配置 Key',
         config_language: '语言', config_language_hint: '界面展示、命令文案、系统提示词等使用的语言（与右上角切换同步）',
         config_model_advanced: '高级配置',
         config_channel: '通道配置',
@@ -365,6 +389,30 @@ const I18N = {
         config_browser_stop: 'Stop',
         config_browser_ok: 'Connection OK',
         config_browser_failed: 'Connection failed',
+        config_video_parse: 'Video Parse Tool',
+        config_video_api_key: 'Gemini API Key',
+        config_video_api_base: 'Gemini API Base',
+        config_video_upload_api_base: 'Upload API Base',
+        config_video_model: 'Model',
+        config_video_prompt: 'Prompt',
+        config_video_advanced: 'Advanced',
+        config_video_download_timeout: 'Download timeout',
+        config_video_ffmpeg_timeout: 'ffmpeg timeout',
+        config_video_gemini_timeout: 'Gemini timeout',
+        config_video_processing_timeout: 'Processing timeout',
+        config_video_max_mb: 'Max video size MB',
+        config_video_temp_dir: 'Temp directory',
+        config_video_keep_temp: 'Keep temp files',
+        config_video_delete_source: 'Delete local video after success',
+        config_video_delete_remote: 'Delete remote file after success',
+        config_video_prefer_json: 'Prefer JSON output',
+        config_video_test: 'Check Config',
+        config_video_ok: 'Config OK',
+        config_video_failed: 'Config issue',
+        config_video_key_tool: 'Tool key',
+        config_video_key_env: 'Env key',
+        config_video_key_global: 'Global key',
+        config_video_key_missing: 'No key',
         config_language: 'Language', config_language_hint: 'Language for the UI, command text, system prompts and more (synced with the top-right switch)',
         config_model_advanced: 'Advanced',
         config_channel: 'Channel Configuration',
@@ -588,6 +636,9 @@ function rerenderDynamicViews() {
     }
     if (currentView === 'config' && typeof initBrowserConfigView === 'function' && browserConfigState) {
         initBrowserConfigView(browserConfigState);
+    }
+    if (currentView === 'config' && typeof initVideoParseConfigView === 'function' && videoParseConfigState) {
+        initVideoParseConfigView(videoParseConfigState);
     }
 }
 
@@ -4033,6 +4084,7 @@ let configCurrentModel = '';
 let cfgProviderValue = '';
 let cfgModelValue = '';
 let browserConfigState = null;
+let videoParseConfigState = null;
 
 // --- Custom dropdown helper ---
 function initDropdown(el, options, selectedValue, onChange, opts) {
@@ -4652,12 +4704,141 @@ function stopBrowserBackend() {
     runBrowserLifecycleAction('stop', 'cfg-browser-stop');
 }
 
+function videoParseKeySourceLabel(source) {
+    if (source === 'tool') return t('config_video_key_tool');
+    if (source === 'env') return t('config_video_key_env');
+    if (source === 'global') return t('config_video_key_global');
+    return t('config_video_key_missing');
+}
+
+function updateVideoParseHealth(health) {
+    const healthEl = document.getElementById('cfg-video-health');
+    if (!healthEl) return;
+    health = health || {};
+    const ok = !!(health.you_get && health.ffmpeg && health.ffprobe && health.gemini_key);
+    const keyLabel = videoParseKeySourceLabel(health.gemini_key_source);
+    const mark = (v) => v ? 'OK' : '--';
+    healthEl.textContent = `you-get ${mark(health.you_get)} · ffmpeg ${mark(health.ffmpeg)} · ffprobe ${mark(health.ffprobe)} · ${keyLabel}`;
+    healthEl.classList.toggle('text-primary-500', ok);
+    healthEl.classList.toggle('text-red-500', !ok);
+    healthEl.classList.toggle('text-slate-400', false);
+    healthEl.classList.toggle('dark:text-slate-500', false);
+}
+
+function initVideoParseConfigView(data) {
+    const cfg = (data && data.config) || {};
+    const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value == null ? '' : value;
+    };
+    const setChecked = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = value === true;
+    };
+
+    initSecretInput(document.getElementById('cfg-video-api-key'), cfg.api_key_masked || '');
+    setValue('cfg-video-api-base', cfg.api_base || 'https://generativelanguage.googleapis.com');
+    setValue('cfg-video-upload-api-base', cfg.upload_api_base || cfg.api_base || 'https://generativelanguage.googleapis.com');
+    setValue('cfg-video-model', cfg.model || 'gemini-2.5-flash');
+    setValue('cfg-video-prompt', cfg.prompt || '');
+    setValue('cfg-video-download-timeout', cfg.download_timeout || 600);
+    setValue('cfg-video-ffmpeg-timeout', cfg.ffmpeg_timeout || 300);
+    setValue('cfg-video-gemini-timeout', cfg.gemini_timeout || 600);
+    setValue('cfg-video-processing-timeout', cfg.processing_timeout || 300);
+    setValue('cfg-video-max-mb', Math.max(1, Math.round((cfg.max_video_bytes || 2147483648) / 1024 / 1024)));
+    setValue('cfg-video-temp-dir', cfg.temp_dir || '');
+    setChecked('cfg-video-keep-temp', cfg.keep_temp === true);
+    setChecked('cfg-video-delete-source', cfg.delete_source_on_success !== false);
+    setChecked('cfg-video-delete-remote', cfg.delete_remote_file !== false);
+    setChecked('cfg-video-prefer-json', cfg.prefer_json !== false);
+    updateVideoParseHealth((data && data.health) || {});
+}
+
+function collectVideoParseConfigPayload() {
+    const getValue = (id) => document.getElementById(id)?.value.trim() || '';
+    const getInt = (id, fallback) => parseInt(document.getElementById(id)?.value || fallback, 10) || fallback;
+    const maxMb = getInt('cfg-video-max-mb', 2048);
+    const payload = {
+        api_base: getValue('cfg-video-api-base') || 'https://generativelanguage.googleapis.com',
+        upload_api_base: getValue('cfg-video-upload-api-base'),
+        model: getValue('cfg-video-model') || 'gemini-2.5-flash',
+        prompt: getValue('cfg-video-prompt'),
+        download_timeout: getInt('cfg-video-download-timeout', 600),
+        ffmpeg_timeout: getInt('cfg-video-ffmpeg-timeout', 300),
+        gemini_timeout: getInt('cfg-video-gemini-timeout', 600),
+        processing_timeout: getInt('cfg-video-processing-timeout', 300),
+        max_video_bytes: Math.max(1, maxMb) * 1024 * 1024,
+        temp_dir: getValue('cfg-video-temp-dir'),
+        keep_temp: document.getElementById('cfg-video-keep-temp')?.checked === true,
+        delete_source_on_success: document.getElementById('cfg-video-delete-source')?.checked === true,
+        delete_remote_file: document.getElementById('cfg-video-delete-remote')?.checked === true,
+        prefer_json: document.getElementById('cfg-video-prefer-json')?.checked !== false,
+    };
+    const keyEl = document.getElementById('cfg-video-api-key');
+    if (keyEl && keyEl.dataset.masked !== '1') {
+        payload.api_key = keyEl.value.trim();
+    }
+    return payload;
+}
+
+function loadVideoParseConfig() {
+    fetch('/api/video-parse').then(r => r.json()).then(data => {
+        if (data.status !== 'success') return;
+        videoParseConfigState = data;
+        initVideoParseConfigView(data);
+    }).catch(() => {});
+}
+
+function saveVideoParseConfig() {
+    const btn = document.getElementById('cfg-video-save');
+    if (btn) btn.disabled = true;
+    fetch('/api/video-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', config: collectVideoParseConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showStatus('cfg-video-status', 'config_saved', false);
+            videoParseConfigState = data;
+            initVideoParseConfigView(data);
+        } else {
+            showStatus('cfg-video-status', 'config_save_error', true);
+        }
+    })
+    .catch(() => showStatus('cfg-video-status', 'config_save_error', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
+function testVideoParseConfig() {
+    const btn = document.getElementById('cfg-video-test');
+    if (btn) btn.disabled = true;
+    fetch('/api/video-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test', config: collectVideoParseConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        const ok = data.status === 'success' && data.ok === true;
+        if (data.status === 'success') {
+            videoParseConfigState = data;
+            updateVideoParseHealth(data.health || {});
+        }
+        showStatus('cfg-video-status', ok ? 'config_video_ok' : 'config_video_failed', !ok);
+    })
+    .catch(() => showStatus('cfg-video-status', 'config_video_failed', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
 function loadConfigView() {
     fetch('/config').then(r => r.json()).then(data => {
         if (data.status !== 'success') return;
         appConfig = data;
         initConfigView(data);
         loadBrowserConfig();
+        loadVideoParseConfig();
     }).catch(() => {});
 }
 
