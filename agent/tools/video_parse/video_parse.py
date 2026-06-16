@@ -138,18 +138,18 @@ class VideoParseTool(BaseTool):
 
             self.report_progress("正在上传视频到 Gemini Files API...")
             file_info = self._upload_file(final_path, mime_type, runtime)
-            file_uri = self._get_nested(file_info, "file", "uri")
-            file_name = self._get_nested(file_info, "file", "name")
+            file_uri = self._file_field(file_info, "uri")
+            file_name = self._file_field(file_info, "name")
             if not file_uri:
                 raise VideoParseError("Gemini Files API did not return file.uri")
 
             if file_name:
                 self.report_progress("正在等待 Gemini 完成视频处理...")
                 file_info = self._wait_for_file_active(file_name, runtime)
-                file_uri = self._get_nested(file_info, "file", "uri") or file_uri
+                file_uri = self._file_field(file_info, "uri") or file_uri
 
             self.report_progress("正在调用 Gemini 解析视频...")
-            response_data = self._generate_content(file_uri, mime_type, runtime)
+            response_data = self._generate_content_when_ready(file_name, file_uri, mime_type, runtime)
             raw_text = self._extract_candidate_text(response_data)
             parsed = self._parse_json_text(raw_text)
             usage = response_data.get("usageMetadata") or {}
@@ -516,20 +516,31 @@ class VideoParseTool(BaseTool):
         self._raise_for_gemini_error(upload_response, "upload video")
         return upload_response.json()
 
-    def _wait_for_file_active(self, file_name: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
-        deadline = time.time() + runtime["processing_timeout"]
+    def _wait_for_file_active(
+        self,
+        file_name: str,
+        runtime: Dict[str, Any],
+        deadline: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        deadline = deadline or time.time() + runtime["processing_timeout"]
         last_info = {}
+        last_logged_state = None
         while True:
             info = self._get_file(file_name, runtime)
             last_info = info
-            state = str(self._get_nested(info, "file", "state") or "").upper()
-            if not state or state == "ACTIVE":
+            state = str(self._file_field(info, "state") or "").upper()
+            display_state = state or "UNKNOWN"
+            if display_state != last_logged_state:
+                logger.info(f"[VideoParse] Gemini file {file_name} state={display_state}")
+                last_logged_state = display_state
+
+            if state == "ACTIVE":
                 return info
-            if state == "FAILED":
+            if state in ("FAILED", "ERROR"):
                 raise VideoParseError(f"Gemini file processing failed for {file_name}")
             if time.time() >= deadline:
                 raise VideoParseError(
-                    f"Timed out waiting for Gemini file to become ACTIVE; last state={state}"
+                    f"Timed out waiting for Gemini file to become ACTIVE; last state={display_state}"
                 )
             time.sleep(2)
 
@@ -544,6 +555,37 @@ class VideoParseTool(BaseTool):
         )
         self._raise_for_gemini_error(response, "get uploaded file")
         return response.json()
+
+    def _generate_content_when_ready(
+        self,
+        file_name: Optional[str],
+        file_uri: str,
+        mime_type: str,
+        runtime: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        deadline = time.time() + runtime["processing_timeout"]
+        attempt = 0
+        while True:
+            try:
+                return self._generate_content(file_uri, mime_type, runtime)
+            except VideoParseError as e:
+                if not file_name or not self._is_file_not_active_error(e):
+                    raise
+
+                attempt += 1
+                if time.time() >= deadline:
+                    raise VideoParseError(
+                        f"Gemini file {file_name} did not become usable before timeout: {e}"
+                    )
+
+                logger.info(
+                    f"[VideoParse] Gemini file {file_name} is not usable yet; "
+                    f"waiting before retry #{attempt}"
+                )
+                self.report_progress("Gemini 文件仍在处理中，继续等待...")
+                file_info = self._wait_for_file_active(file_name, runtime, deadline=deadline)
+                file_uri = self._file_field(file_info, "uri") or file_uri
+                time.sleep(min(2 * attempt, 10))
 
     def _generate_content(self, file_uri: str, mime_type: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
         url = "{}/v1beta/models/{}:generateContent".format(runtime["api_base"], runtime["model"])
@@ -682,6 +724,18 @@ class VideoParseTool(BaseTool):
         except Exception:
             pass
         raise VideoParseError(f"Gemini API failed to {action}: HTTP {response.status_code}: {message}")
+
+    def _file_field(self, data: Dict[str, Any], key: str) -> Any:
+        value = self._get_nested(data, "file", key)
+        if value is not None:
+            return value
+        if isinstance(data, dict):
+            return data.get(key)
+        return None
+
+    def _is_file_not_active_error(self, error: Exception) -> bool:
+        message = str(error).lower()
+        return "not in an active state" in message or "not in a active state" in message
 
     def _get_nested(self, data: Dict[str, Any], *keys: str) -> Any:
         cur = data
