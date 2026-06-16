@@ -40,6 +40,13 @@ def load_config_json() -> dict:
         return {}
 
 
+def save_config_json(config: dict) -> None:
+    """Persist config.json to project root."""
+    config_path = os.path.join(get_project_root(), "config.json")
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+
+
 def get_cli_language() -> str:
     """Resolve the CLI UI language using the shared i18n detector.
 

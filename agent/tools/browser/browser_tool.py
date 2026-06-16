@@ -1,9 +1,9 @@
 """
-Browser tool - Control a Chromium browser for web navigation and interaction.
+Browser tool - Control a browser for web navigation and interaction.
 
-Uses Playwright under the hood. Browser instance is lazily started on first
-use, reused across tool calls within the same session, and cleaned up via
-close().
+Uses the configured browser backend under the hood. Browser instance is lazily
+started on first use, reused across tool calls within the same session, and
+cleaned up via close().
 
 Launch modes (configured under `tools.browser` in config.json):
   - persistent (default): Chromium runs with a persistent user_data_dir
@@ -20,7 +20,7 @@ import os
 from typing import Dict, Any, Optional
 
 from agent.tools.base_tool import BaseTool, ToolResult
-from agent.tools.browser.browser_service import BrowserService
+from agent.tools.browser.factory import create_browser_service, _service_signature
 from common.log import logger
 
 
@@ -30,6 +30,7 @@ class BrowserTool(BaseTool):
     name: str = "browser"
     description: str = (
         "Control a browser to navigate web pages, interact with elements, and extract content. "
+        "The active backend is configured by CowAgent and may be Playwright or Camofox. "
         "Actions: navigate, snapshot, click, fill, select, scroll, screenshot, wait, back, forward, "
         "get_text, press, evaluate.\n\n"
         "Workflow: navigate (auto-includes snapshot with element refs) → click/fill/select by ref → snapshot to verify.\n\n"
@@ -61,8 +62,8 @@ class BrowserTool(BaseTool):
                 "description": "URL to navigate to (for 'navigate' action)"
             },
             "ref": {
-                "type": "integer",
-                "description": "Element ref number from snapshot (for click/fill/select)"
+                "anyOf": [{"type": "integer"}, {"type": "string"}],
+                "description": "Element ref from snapshot (number for Playwright, e.g. 1; string for Camofox, e.g. e1)"
             },
             "selector": {
                 "type": "string",
@@ -100,25 +101,52 @@ class BrowserTool(BaseTool):
         "required": ["action"]
     }
 
-    _shared_service: Optional[BrowserService] = None
+    _shared_service = None
+    _shared_signature: str = ""
 
     def __init__(self, config: dict = None):
         self.config = config or {}
         self.cwd = self.config.get("cwd", os.getcwd())
-        self._service: Optional[BrowserService] = None
+        self._service = None
+        self._service_signature = ""
 
-    def _get_service(self) -> BrowserService:
+    def _effective_config(self) -> dict:
+        """Read the latest runtime config so Web console switches hot-apply."""
+        try:
+            from agent.tools.tool_manager import ToolManager
+            tm = ToolManager()
+            runtime_config = getattr(tm, "tool_configs", {}).get(self.name)
+            if isinstance(runtime_config, dict):
+                self.config = runtime_config
+        except Exception as e:
+            logger.debug(f"[Browser] Failed to read runtime browser config: {e}")
+        return self.config
+
+    def _get_service(self):
         """Get or create the browser service, sharing across copies."""
-        if self._service is not None:
+        config = self._effective_config()
+        signature = _service_signature(config)
+        if self._service is not None and self._service_signature == signature:
             return self._service
 
         # Reuse shared service across tool copies within the same session
-        if BrowserTool._shared_service is not None:
+        if BrowserTool._shared_service is not None and BrowserTool._shared_signature == signature:
             self._service = BrowserTool._shared_service
+            self._service_signature = signature
             return self._service
 
-        self._service = BrowserService(self.config)
+        if BrowserTool._shared_service is not None and BrowserTool._shared_signature != signature:
+            try:
+                BrowserTool._shared_service.close()
+            except Exception as e:
+                logger.debug(f"[Browser] Failed to close stale service: {e}")
+            BrowserTool._shared_service = None
+            BrowserTool._shared_signature = ""
+
+        self._service = create_browser_service(config)
+        self._service_signature = signature
         BrowserTool._shared_service = self._service
+        BrowserTool._shared_signature = signature
         return self._service
 
     def execute(self, args: Dict[str, Any]) -> ToolResult:
@@ -292,6 +320,7 @@ class BrowserTool(BaseTool):
         new_tool.context = getattr(self, "context", None)
         new_tool.cwd = self.cwd
         new_tool._service = self._service
+        new_tool._service_signature = self._service_signature
         return new_tool
 
     def close(self):
@@ -299,5 +328,18 @@ class BrowserTool(BaseTool):
         if self._service:
             self._service.close()
             self._service = None
+            self._service_signature = ""
         BrowserTool._shared_service = None
+        BrowserTool._shared_signature = ""
         logger.info("[Browser] BrowserTool closed")
+
+    @classmethod
+    def reset_shared_service(cls):
+        """Close the shared browser backend so config changes take effect."""
+        if cls._shared_service:
+            try:
+                cls._shared_service.close()
+            except Exception as e:
+                logger.debug(f"[Browser] Failed to reset shared service: {e}")
+        cls._shared_service = None
+        cls._shared_signature = ""

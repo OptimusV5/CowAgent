@@ -103,6 +103,26 @@ def _default_stream(msg: str, fg: Optional[str] = None) -> None:
 def run_install_browser(
     stream: Optional[StreamFn] = None,
     on_phase: Optional[PhaseFn] = None,
+    engine: str = "playwright",
+) -> int:
+    engine = (engine or "playwright").strip().lower()
+    if engine in ("playwright", "chromium"):
+        return run_install_playwright_browser(stream=stream, on_phase=on_phase)
+    if engine == "camofox":
+        return run_install_camofox_browser(stream=stream, on_phase=on_phase)
+    if engine == "all":
+        ret = run_install_playwright_browser(stream=stream, on_phase=on_phase)
+        if ret != 0:
+            return ret
+        return run_install_camofox_browser(stream=stream, on_phase=on_phase)
+    stream = stream or _default_stream
+    stream(f"Unknown browser engine: {engine}", "red")
+    return 1
+
+
+def run_install_playwright_browser(
+    stream: Optional[StreamFn] = None,
+    on_phase: Optional[PhaseFn] = None,
 ) -> int:
     """
     Install Playwright Python package, optional Linux deps, and Chromium.
@@ -309,9 +329,94 @@ def run_install_browser(
     return 0
 
 
+def _node_major_version() -> int:
+    try:
+        out = subprocess.check_output(["node", "--version"], stderr=subprocess.DEVNULL)
+        ver = out.decode().strip().lstrip("v")
+        return int(ver.split(".", 1)[0])
+    except Exception:
+        return 0
+
+
+def run_install_camofox_browser(
+    stream: Optional[StreamFn] = None,
+    on_phase: Optional[PhaseFn] = None,
+) -> int:
+    """Install camofox-browser under ~/.cow/browser/camofox."""
+    from cli.utils import get_cli_language
+
+    get_cli_language()
+    from common import i18n
+    from common.utils import expand_path
+    _t = i18n.t
+
+    stream = stream or _default_stream
+    install_dir = expand_path("~/.cow/browser/camofox")
+
+    _phase(on_phase, _t(
+        "🦊 开始安装 Camofox 浏览器后端…",
+        "🦊 Installing Camofox browser backend…",
+    ))
+
+    node_major = _node_major_version()
+    if node_major < 22:
+        stream(
+            "Camofox requires Node.js >= 22. Install Node.js 22+ and retry.",
+            "red",
+        )
+        _phase(on_phase, _t(
+            "❌ Camofox 需要 Node.js 22 或更高版本。",
+            "❌ Camofox requires Node.js 22 or newer.",
+        ))
+        return 1
+
+    try:
+        subprocess.check_call(["npm", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        stream("npm is required to install camofox-browser.", "red")
+        return 1
+
+    os.makedirs(install_dir, exist_ok=True)
+    package_json = os.path.join(install_dir, "package.json")
+    if not os.path.exists(package_json):
+        with open(package_json, "w", encoding="utf-8") as f:
+            f.write('{"private":true,"dependencies":{}}\n')
+
+    _phase(on_phase, _t(
+        "📦 正在安装 @askjo/camofox-browser（首次会下载 Camoufox 浏览器内核）…",
+        "📦 Installing @askjo/camofox-browser (first run downloads Camoufox)…",
+    ))
+    stream(f"Installing @askjo/camofox-browser into {install_dir}...", "yellow")
+    ret = subprocess.call(["npm", "install", "@askjo/camofox-browser"], cwd=install_dir)
+    if ret != 0:
+        stream("Failed to install @askjo/camofox-browser.", "red")
+        return 1
+
+    bin_path = os.path.join(install_dir, "node_modules", ".bin", "camofox-browser")
+    if not os.path.exists(bin_path):
+        stream("camofox-browser installed, but executable was not found.", "yellow")
+    else:
+        stream(f"  executable: {bin_path}", "green")
+
+    _phase(on_phase, _t(
+        "✅ Camofox 浏览器后端已安装。",
+        "✅ Camofox browser backend installed.",
+    ))
+    stream("")
+    stream("Camofox backend ready. Use `cow browser switch camofox` to enable it.", "green")
+    return 0
+
+
 @click.command("install-browser")
-def install_browser():
-    """Install browser tool dependencies (Playwright + Chromium)."""
-    code = run_install_browser()
+@click.option(
+    "--engine",
+    type=click.Choice(["playwright", "camofox", "all"], case_sensitive=False),
+    default="playwright",
+    show_default=True,
+    help="Browser backend to install.",
+)
+def install_browser(engine):
+    """Install browser tool dependencies."""
+    code = run_install_browser(engine=engine)
     if code != 0:
         raise SystemExit(code)

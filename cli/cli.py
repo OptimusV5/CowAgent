@@ -7,6 +7,7 @@ from cli.commands.process import start, stop, restart, self_restart, update, sta
 from cli.commands.context import context
 from cli.commands.install import install_browser
 from cli.commands.knowledge import knowledge
+from cli.commands.browser import browser
 
 
 HELP_TEXT = """Usage: cow COMMAND [ARGS]...
@@ -24,7 +25,8 @@ Commands:
   logs     View CowAgent logs.
   skill    Manage CowAgent skills.
   knowledge  Manage knowledge base.
-  install-browser  Install browser tool (Playwright + Chromium).
+  install-browser  Install browser tool dependencies.
+  browser  Manage browser backend.
 
 Tip: Memory index management lives in chat — send /memory status or
 /memory rebuild-index to the running agent."""
@@ -75,6 +77,7 @@ main.add_command(logs)
 main.add_command(context)
 main.add_command(knowledge)
 main.add_command(install_browser)
+main.add_command(browser)
 
 
 if __name__ == '__main__':

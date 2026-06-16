@@ -1144,6 +1144,7 @@ class WebChannel(ChatChannel):
             '/chat', 'ChatHandler',
             '/config', 'ConfigHandler',
             '/api/models', 'ModelsHandler',
+            '/api/browser', 'BrowserConfigHandler',
             '/api/channels', 'ChannelsHandler',
             '/api/weixin/qrlogin', 'WeixinQrHandler',
             '/api/feishu/register', 'FeishuRegisterHandler',
@@ -3355,6 +3356,229 @@ class ModelsHandler:
             logger.info("[ModelsHandler] Bridge bot routing reset")
         except Exception as e:
             logger.warning(f"[ModelsHandler] Bridge reset failed: {e}")
+
+
+class BrowserConfigHandler:
+    """API for browser backend configuration and health checks."""
+
+    @staticmethod
+    def _default_browser_config() -> dict:
+        return {
+            "engine": "playwright",
+            "playwright": {
+                "persistent": True,
+                "user_data_dir": "~/.cow/browser_profile",
+                "cdp_endpoint": "",
+                "idle_timeout": 300,
+            },
+            "camofox": {
+                "base_url": "http://127.0.0.1:9377",
+                "access_key": "",
+                "admin_key": "",
+                "auto_start": False,
+                "managed": False,
+                "port": 9377,
+                "user_id": "cow-agent",
+                "session_key": "default",
+            },
+        }
+
+    @staticmethod
+    def _merge_defaults(cfg: dict) -> dict:
+        base = BrowserConfigHandler._default_browser_config()
+        if isinstance(cfg, dict):
+            for key, value in cfg.items():
+                if key in ("playwright", "camofox") and isinstance(value, dict):
+                    base[key].update(value)
+                else:
+                    base[key] = value
+        return base
+
+    @staticmethod
+    def _deep_update(base: dict, updates: dict) -> dict:
+        if not isinstance(updates, dict):
+            return base
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict):
+                BrowserConfigHandler._deep_update(base[key], value)
+            else:
+                base[key] = value
+        return base
+
+    @classmethod
+    def _current_config(cls) -> dict:
+        tools = conf().get("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+        return cls._merge_defaults(tools.get("browser") if isinstance(tools.get("browser"), dict) else {})
+
+    @classmethod
+    def _merge_with_current(cls, incoming: dict = None) -> dict:
+        cfg = cls._current_config()
+        if isinstance(incoming, dict):
+            cls._deep_update(cfg, incoming)
+        return cls._merge_defaults(cfg)
+
+    @classmethod
+    def _config_path(cls) -> str:
+        return ModelsHandler._config_path()
+
+    @classmethod
+    def _read_file_config(cls) -> dict:
+        path = cls._config_path()
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @classmethod
+    def _write_file_config(cls, data: dict) -> None:
+        with open(cls._config_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    @staticmethod
+    def _mask_key(value: str) -> str:
+        if not value:
+            return ""
+        if len(value) <= 8:
+            return "*" * len(value)
+        return value[:4] + "*" * (len(value) - 8) + value[-4:]
+
+    @classmethod
+    def _public_config(cls, cfg: dict) -> dict:
+        public = json.loads(json.dumps(cfg))
+        camofox_cfg = public.get("camofox")
+        if isinstance(camofox_cfg, dict):
+            access_key = camofox_cfg.pop("access_key", "") or ""
+            admin_key = camofox_cfg.pop("admin_key", "") or ""
+            camofox_cfg["access_key_masked"] = cls._mask_key(access_key)
+            camofox_cfg["admin_key_masked"] = cls._mask_key(admin_key)
+            camofox_cfg["admin_key_configured"] = bool(admin_key)
+        return public
+
+    @staticmethod
+    def _camofox_health(camofox_cfg: dict) -> dict:
+        try:
+            import requests
+            base_url = (camofox_cfg.get("base_url") or "http://127.0.0.1:9377").rstrip("/")
+            headers = {}
+            access_key = (camofox_cfg.get("access_key") or "").strip()
+            if access_key:
+                headers["Authorization"] = f"Bearer {access_key}"
+            resp = requests.get(f"{base_url}/health", headers=headers, timeout=5)
+            if resp.status_code >= 400:
+                return {"ok": False, "status_code": resp.status_code, "error": resp.text[:300]}
+            data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
+            return {"ok": True, "status_code": resp.status_code, **data}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    @staticmethod
+    def _playwright_available() -> bool:
+        try:
+            import playwright  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    @classmethod
+    def _apply_runtime_config(cls, browser_cfg: dict) -> None:
+        local_config = conf()
+        tools = local_config.get("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+        tools["browser"] = browser_cfg
+        local_config["tools"] = tools
+        try:
+            from agent.tools.tool_manager import ToolManager
+            tm = ToolManager()
+            if not hasattr(tm, "tool_configs") or not isinstance(tm.tool_configs, dict):
+                tm.tool_configs = {}
+            tm.tool_configs["browser"] = browser_cfg
+            from agent.tools.browser.browser_tool import BrowserTool
+            BrowserTool.reset_shared_service()
+            logger.info("[BrowserConfig] Browser tool runtime config refreshed")
+        except Exception as e:
+            logger.warning(f"[BrowserConfig] runtime refresh failed: {e}")
+
+    def GET(self):
+        _require_auth()
+        web.header("Content-Type", "application/json; charset=utf-8")
+        try:
+            cfg = self._current_config()
+            camofox_cfg = cfg.get("camofox") or {}
+            public_cfg = self._public_config(cfg)
+            engine = cfg.get("engine", "playwright")
+            camofox_health = (
+                self._camofox_health(camofox_cfg)
+                if engine in ("camofox", "auto")
+                else {"ok": None, "engine": "playwright"}
+            )
+            return json.dumps({
+                "status": "success",
+                "config": public_cfg,
+                "public": {
+                    "engine": engine,
+                    "playwright_available": self._playwright_available(),
+                    "camofox": public_cfg.get("camofox", {}),
+                    "camofox_health": camofox_health,
+                },
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[BrowserConfig] GET failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+    def POST(self):
+        _require_auth()
+        web.header("Content-Type", "application/json; charset=utf-8")
+        try:
+            data = json.loads(web.data() or b"{}")
+            action = (data.get("action") or "save").strip().lower()
+            if action == "test":
+                cfg = self._merge_with_current(data.get("config") if isinstance(data.get("config"), dict) else None)
+                engine = (cfg.get("engine") or "playwright").strip().lower()
+                if engine == "playwright":
+                    ok = self._playwright_available()
+                    return json.dumps({"status": "success", "health": {"ok": ok, "engine": "playwright"}}, ensure_ascii=False)
+                health = self._camofox_health(cfg.get("camofox") or {})
+                if engine == "auto" and not health.get("ok"):
+                    health["fallback_playwright_available"] = self._playwright_available()
+                return json.dumps({"status": "success", "health": health}, ensure_ascii=False)
+            if action == "start":
+                cfg = self._merge_with_current(data.get("config") if isinstance(data.get("config"), dict) else None)
+                from agent.tools.browser.camofox_service import CamofoxBrowserService
+                result = CamofoxBrowserService(cfg).start()
+                return json.dumps({"status": "success" if result.get("ok") else "error", "result": result}, ensure_ascii=False)
+            if action == "stop":
+                cfg = self._merge_with_current(data.get("config") if isinstance(data.get("config"), dict) else None)
+                from agent.tools.browser.camofox_service import CamofoxBrowserService
+                result = CamofoxBrowserService(cfg).stop()
+                return json.dumps({"status": "success" if result.get("ok") else "error", "result": result}, ensure_ascii=False)
+            if action not in ("save", "switch"):
+                return json.dumps({"status": "error", "message": f"unknown action: {action!r}"})
+
+            incoming = data.get("config") or {}
+            if not isinstance(incoming, dict):
+                return json.dumps({"status": "error", "message": "config must be an object"})
+            cfg = self._merge_with_current(incoming)
+            engine = (cfg.get("engine") or "playwright").strip().lower()
+            if engine not in ("playwright", "camofox", "auto"):
+                return json.dumps({"status": "error", "message": f"invalid engine: {engine}"})
+            cfg["engine"] = engine
+
+            file_cfg = self._read_file_config()
+            tools = file_cfg.get("tools")
+            if not isinstance(tools, dict):
+                tools = {}
+            tools["browser"] = cfg
+            file_cfg["tools"] = tools
+            self._write_file_config(file_cfg)
+            self._apply_runtime_config(cfg)
+            logger.info(f"[BrowserConfig] browser config saved: engine={engine}")
+            return json.dumps({"status": "success", "config": self._public_config(cfg)}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[BrowserConfig] POST failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
 
 
 class ChannelsHandler:

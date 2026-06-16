@@ -128,6 +128,15 @@ const I18N = {
         input_placeholder: '输入消息，或输入 / 使用指令',
         config_title: '配置管理', config_desc: '管理模型和 Agent 配置',
         config_model: '模型配置', config_agent: 'Agent 配置',
+        config_browser: '浏览器工具',
+        config_browser_engine: '浏览器后端',
+        config_browser_managed: '托管进程',
+        config_browser_autostart: '自动启动',
+        config_browser_test: '测试连接',
+        config_browser_start: '启动',
+        config_browser_stop: '停止',
+        config_browser_ok: '连接正常',
+        config_browser_failed: '连接失败',
         config_language: '语言', config_language_hint: '界面展示、命令文案、系统提示词等使用的语言（与右上角切换同步）',
         config_model_advanced: '高级配置',
         config_channel: '通道配置',
@@ -347,6 +356,15 @@ const I18N = {
         input_placeholder: 'Type a message, or press / for commands',
         config_title: 'Configuration', config_desc: 'Manage model and agent settings',
         config_model: 'Model Configuration', config_agent: 'Agent Configuration',
+        config_browser: 'Browser Tool',
+        config_browser_engine: 'Browser Backend',
+        config_browser_managed: 'Managed Process',
+        config_browser_autostart: 'Auto Start',
+        config_browser_test: 'Test Connection',
+        config_browser_start: 'Start',
+        config_browser_stop: 'Stop',
+        config_browser_ok: 'Connection OK',
+        config_browser_failed: 'Connection failed',
         config_language: 'Language', config_language_hint: 'Language for the UI, command text, system prompts and more (synced with the top-right switch)',
         config_model_advanced: 'Advanced',
         config_channel: 'Channel Configuration',
@@ -567,6 +585,9 @@ function rerenderDynamicViews() {
     if (currentView === 'models' && typeof renderModelsView === 'function'
             && modelsState && (modelsState.providers || modelsState.capabilities)) {
         renderModelsView();
+    }
+    if (currentView === 'config' && typeof initBrowserConfigView === 'function' && browserConfigState) {
+        initBrowserConfigView(browserConfigState);
     }
 }
 
@@ -4011,6 +4032,7 @@ let configApiKeys = {};
 let configCurrentModel = '';
 let cfgProviderValue = '';
 let cfgModelValue = '';
+let browserConfigState = null;
 
 // --- Custom dropdown helper ---
 function initDropdown(el, options, selectedValue, onChange, opts) {
@@ -4431,11 +4453,211 @@ function savePasswordConfig() {
     .finally(() => { btn.disabled = false; });
 }
 
+function initSecretInput(input, maskedValue) {
+    if (!input) return;
+    const masked = maskedValue || '';
+    input.value = masked;
+    input.dataset.masked = masked ? '1' : '';
+    input.dataset.maskedVal = masked;
+    input.classList.toggle('cfg-key-masked', !!masked);
+    input.placeholder = masked ? '••••••••' : '';
+
+    if (!input._cfgSecretBound) {
+        input.addEventListener('focus', function() {
+            if (this.dataset.masked === '1') {
+                this.value = '';
+                this.dataset.masked = '';
+                this.classList.remove('cfg-key-masked');
+            }
+        });
+        input.addEventListener('blur', function() {
+            if (!this.value.trim() && this.dataset.maskedVal) {
+                this.value = this.dataset.maskedVal;
+                this.dataset.masked = '1';
+                this.classList.add('cfg-key-masked');
+            }
+        });
+        input.addEventListener('input', function() {
+            this.dataset.masked = '';
+        });
+        input._cfgSecretBound = true;
+    }
+}
+
+function updateBrowserBackendVisibility(engine) {
+    const value = (engine || getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
+    const camofoxEl = document.getElementById('cfg-browser-camofox');
+    const playwrightEl = document.getElementById('cfg-browser-playwright');
+    if (camofoxEl) camofoxEl.classList.toggle('hidden', value === 'playwright');
+    if (playwrightEl) playwrightEl.classList.toggle('hidden', value === 'camofox');
+    const startEl = document.getElementById('cfg-browser-start');
+    const stopEl = document.getElementById('cfg-browser-stop');
+    if (startEl) startEl.classList.toggle('hidden', value === 'playwright');
+    if (stopEl) stopEl.classList.toggle('hidden', value === 'playwright');
+}
+
+function initBrowserConfigView(data) {
+    const cfg = (data && data.config) || {};
+    const engine = (cfg.engine || (data && data.public && data.public.engine) || 'playwright').toLowerCase();
+    const engineEl = document.getElementById('cfg-browser-engine');
+    if (!engineEl) return;
+
+    initDropdown(engineEl, [
+        { value: 'playwright', label: 'Playwright' },
+        { value: 'camofox', label: 'Camofox' },
+        { value: 'auto', label: currentLang === 'zh' ? '自动' : 'Auto' },
+    ], engine, updateBrowserBackendVisibility);
+    updateBrowserBackendVisibility(engine);
+
+    const camofox = cfg.camofox || {};
+    const playwright = cfg.playwright || {};
+    const health = (data && data.public && data.public.camofox_health) || {};
+    const healthEl = document.getElementById('cfg-browser-health');
+    if (healthEl) {
+        if (engine === 'camofox' || engine === 'auto') {
+            healthEl.textContent = health.ok ? t('config_browser_ok') : t('config_browser_failed');
+            healthEl.classList.toggle('text-primary-500', !!health.ok);
+            healthEl.classList.toggle('text-red-500', !health.ok);
+            healthEl.classList.toggle('text-slate-400', false);
+            healthEl.classList.toggle('dark:text-slate-500', false);
+        } else {
+            healthEl.textContent = currentLang === 'zh' ? 'Playwright' : 'Playwright';
+            healthEl.classList.remove('text-primary-500', 'text-red-500');
+            healthEl.classList.add('text-slate-400', 'dark:text-slate-500');
+        }
+    }
+
+    const baseEl = document.getElementById('cfg-camofox-base-url');
+    if (baseEl) baseEl.value = camofox.base_url || 'http://127.0.0.1:9377';
+    initSecretInput(document.getElementById('cfg-camofox-access-key'), camofox.access_key_masked || '');
+    initSecretInput(document.getElementById('cfg-camofox-admin-key'), camofox.admin_key_masked || '');
+    const portEl = document.getElementById('cfg-camofox-port');
+    if (portEl) portEl.value = camofox.port || 9377;
+    const managedEl = document.getElementById('cfg-camofox-managed');
+    if (managedEl) managedEl.checked = camofox.managed === true;
+    const autoStartEl = document.getElementById('cfg-camofox-auto-start');
+    if (autoStartEl) autoStartEl.checked = camofox.auto_start === true;
+
+    const cdpEl = document.getElementById('cfg-playwright-cdp');
+    if (cdpEl) cdpEl.value = playwright.cdp_endpoint || '';
+    const userDataEl = document.getElementById('cfg-playwright-user-data');
+    if (userDataEl) userDataEl.value = playwright.user_data_dir || '~/.cow/browser_profile';
+}
+
+function collectBrowserConfigPayload() {
+    const engine = (getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
+    const payload = {
+        engine,
+        playwright: {
+            cdp_endpoint: document.getElementById('cfg-playwright-cdp')?.value.trim() || '',
+            user_data_dir: document.getElementById('cfg-playwright-user-data')?.value.trim() || '~/.cow/browser_profile',
+        },
+        camofox: {
+            base_url: document.getElementById('cfg-camofox-base-url')?.value.trim() || 'http://127.0.0.1:9377',
+            port: parseInt(document.getElementById('cfg-camofox-port')?.value || '9377') || 9377,
+            managed: document.getElementById('cfg-camofox-managed')?.checked === true,
+            auto_start: document.getElementById('cfg-camofox-auto-start')?.checked === true,
+        },
+    };
+    const accessKeyEl = document.getElementById('cfg-camofox-access-key');
+    if (accessKeyEl && accessKeyEl.dataset.masked !== '1') {
+        payload.camofox.access_key = accessKeyEl.value.trim();
+    }
+    const adminKeyEl = document.getElementById('cfg-camofox-admin-key');
+    if (adminKeyEl && adminKeyEl.dataset.masked !== '1') {
+        payload.camofox.admin_key = adminKeyEl.value.trim();
+    }
+    return payload;
+}
+
+function loadBrowserConfig() {
+    fetch('/api/browser').then(r => r.json()).then(data => {
+        if (data.status !== 'success') return;
+        browserConfigState = data;
+        initBrowserConfigView(data);
+    }).catch(() => {});
+}
+
+function saveBrowserConfig() {
+    const btn = document.getElementById('cfg-browser-save');
+    if (btn) btn.disabled = true;
+    fetch('/api/browser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', config: collectBrowserConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showStatus('cfg-browser-status', 'config_saved', false);
+            loadBrowserConfig();
+        } else {
+            showStatus('cfg-browser-status', 'config_save_error', true);
+        }
+    })
+    .catch(() => showStatus('cfg-browser-status', 'config_save_error', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
+function testBrowserConfig() {
+    const btn = document.getElementById('cfg-browser-test');
+    if (btn) btn.disabled = true;
+    fetch('/api/browser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test', config: collectBrowserConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        const engine = (getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
+        const health = data.health || {};
+        const ok = data.status === 'success' && (
+            health.ok || (engine === 'auto' && health.fallback_playwright_available)
+        );
+        showStatus('cfg-browser-status', ok ? 'config_browser_ok' : 'config_browser_failed', !ok);
+        const healthEl = document.getElementById('cfg-browser-health');
+        if (healthEl) {
+            healthEl.textContent = ok ? t('config_browser_ok') : t('config_browser_failed');
+            healthEl.classList.toggle('text-primary-500', ok);
+            healthEl.classList.toggle('text-red-500', !ok);
+        }
+    })
+    .catch(() => showStatus('cfg-browser-status', 'config_browser_failed', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
+function runBrowserLifecycleAction(action, buttonId) {
+    const btn = document.getElementById(buttonId);
+    if (btn) btn.disabled = true;
+    fetch('/api/browser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, config: collectBrowserConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        const ok = data.status === 'success';
+        showStatus('cfg-browser-status', ok ? 'config_browser_ok' : 'config_browser_failed', !ok);
+        loadBrowserConfig();
+    })
+    .catch(() => showStatus('cfg-browser-status', 'config_browser_failed', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
+function startBrowserBackend() {
+    runBrowserLifecycleAction('start', 'cfg-browser-start');
+}
+
+function stopBrowserBackend() {
+    runBrowserLifecycleAction('stop', 'cfg-browser-stop');
+}
+
 function loadConfigView() {
     fetch('/config').then(r => r.json()).then(data => {
         if (data.status !== 'success') return;
         appConfig = data;
         initConfigView(data);
+        loadBrowserConfig();
     }).catch(() => {});
 }
 
