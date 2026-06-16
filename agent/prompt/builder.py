@@ -205,6 +205,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "scheduler": "manage scheduled tasks and reminders",
             "send": "send a local file to the user (local files only; put URLs directly in the reply text)",
             "vision": "analyze images (recognition, description, OCR, etc.)",
+            "audio_transcribe": "transcribe local audio/voice files using the configured ASR provider",
         }
     else:
         core_summaries = {
@@ -225,6 +226,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "scheduler": "管理定时任务和提醒",
             "send": "发送本地文件给用户（仅限本地文件，URL直接放在回复文本中）",
             "vision": "分析图片内容（识别、描述、OCR文字提取等）",
+            "audio_transcribe": "使用已配置的语音识别服务转写本地音频/语音文件",
         }
 
     # Preferred display order
@@ -233,7 +235,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
         "bash", "terminal",
         "web_search", "web_fetch", "browser",
         "memory_search", "memory_get",
-        "env_config", "scheduler", "send", "vision",
+        "env_config", "scheduler", "send", "vision", "audio_transcribe",
     ]
 
     # Build name -> summary mapping for available tools
@@ -265,6 +267,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "- Keep going until the task is done, then report the result to the user",
             "- Always redact secrets, tokens and other sensitive info in replies",
             "- Put URLs directly in the reply text; the system handles and renders them. Don't download and re-send them via the send tool",
+            "- For audio or voice file transcription, use audio_transcribe first. Do not inspect env_config or call speech/audio APIs manually",
             "",
         ]
     else:
@@ -280,6 +283,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "- 持续推进直到任务完成，完成后向用户报告结果",
             "- 回复中涉及密钥、令牌等敏感信息必须脱敏",
             "- URL链接直接放在回复文本中即可，系统会自动处理和渲染。无需下载后使用send工具发送",
+            "- 音频/语音文件转文字时，优先使用 audio_transcribe。不要先查 env_config，也不要手动调用语音/音频 API",
             "",
         ]
 
