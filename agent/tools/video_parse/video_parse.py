@@ -42,6 +42,30 @@ SUPPORTED_VIDEO_MIME_TYPES = {
     "video/3gpp",
 }
 
+VIDEO_FILE_EXTENSIONS = {
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".flv",
+    ".avi",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
+    ".3gp",
+}
+
+AUDIO_FILE_EXTENSIONS = {
+    ".m4a",
+    ".mp3",
+    ".aac",
+    ".opus",
+    ".ogg",
+    ".wav",
+    ".flac",
+}
+
 MIME_ALIASES = {
     "video/x-msvideo": "video/avi",
     "video/vnd.avi": "video/avi",
@@ -292,6 +316,7 @@ class VideoParseTool(BaseTool):
         cmd = [
             "yt-dlp",
             "--no-playlist",
+            "--no-progress",
             "-o",
             os.path.join(work_dir, "%(title).200B.%(id)s.%(ext)s"),
         ]
@@ -351,7 +376,7 @@ class VideoParseTool(BaseTool):
                     continue
                 if os.path.getsize(path) <= 0:
                     continue
-                if self._probe_media(path):
+                if self._probe_media(path) or self._guess_media_streams(path):
                     paths.append(path)
         paths.sort(key=lambda p: os.path.getsize(p), reverse=True)
         return paths
@@ -364,7 +389,7 @@ class VideoParseTool(BaseTool):
     ) -> Tuple[str, bool]:
         candidates = []
         for path in media_paths:
-            probe = self._probe_media(path)
+            probe = self._probe_media(path) or self._guess_media_streams(path)
             if probe:
                 candidates.append({
                     "path": path,
@@ -423,6 +448,16 @@ class VideoParseTool(BaseTool):
         if not has_video and not has_audio:
             return None
         return {"has_video": has_video, "has_audio": has_audio}
+
+    def _guess_media_streams(self, path: str) -> Optional[Dict[str, bool]]:
+        ext = os.path.splitext(path)[1].lower()
+        if ext in AUDIO_FILE_EXTENSIONS:
+            logger.warning(f"[VideoParse] ffprobe failed for audio-like file, using extension fallback: {path}")
+            return {"has_video": False, "has_audio": True}
+        if ext in VIDEO_FILE_EXTENSIONS:
+            logger.warning(f"[VideoParse] ffprobe failed for video-like file, using extension fallback: {path}")
+            return {"has_video": True, "has_audio": True}
+        return None
 
     def _merge_streams(self, video_path: str, audio_path: str, final_path: str, timeout: int) -> None:
         cmd = [
