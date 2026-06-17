@@ -164,6 +164,7 @@ class VideoParseTool(BaseTool):
                 raise VideoParseError(
                     f"Unsupported video MIME type: {mime_type}. Supported: {supported}"
                 )
+            final_path = self._ensure_ascii_upload_path(final_path, work_dir)
 
             self.report_progress("正在上传视频到 Gemini Files API...")
             file_info = self._upload_file(final_path, mime_type, runtime)
@@ -318,7 +319,7 @@ class VideoParseTool(BaseTool):
             "--no-playlist",
             "--no-progress",
             "-o",
-            os.path.join(work_dir, "%(title).200B.%(id)s.%(ext)s"),
+            os.path.join(work_dir, "%(id)s.%(ext)s"),
         ]
         cookie_file = str(cookie_file or "").strip()
         if cookie_file:
@@ -529,6 +530,22 @@ class VideoParseTool(BaseTool):
             mime_type = "video/mpeg"
 
         return MIME_ALIASES.get(mime_type, mime_type or "application/octet-stream")
+
+    def _ensure_ascii_upload_path(self, path: str, work_dir: str) -> str:
+        basename = os.path.basename(path)
+        try:
+            basename.encode("ascii")
+            return path
+        except UnicodeEncodeError:
+            pass
+
+        ext = os.path.splitext(path)[1].lower() or ".mp4"
+        ascii_path = os.path.join(work_dir, f"video_{uuid.uuid4().hex}{ext}")
+        if os.path.abspath(path) == os.path.abspath(ascii_path):
+            return path
+        shutil.copy2(path, ascii_path)
+        logger.info(f"[VideoParse] Copied upload file to ASCII path: {ascii_path}")
+        return ascii_path
 
     def _upload_file(self, path: str, mime_type: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
         num_bytes = os.path.getsize(path)
