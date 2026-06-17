@@ -3585,6 +3585,8 @@ class BrowserConfigHandler:
 class VideoParseConfigHandler:
     """API for video_parse tool configuration and local dependency checks."""
 
+    COOKIE_INSTALL_HINT = "python3 -m pip install -U yt-dlp"
+
     @staticmethod
     def _default_config() -> dict:
         return {
@@ -3606,6 +3608,7 @@ class VideoParseConfigHandler:
             "delete_source_on_success": True,
             "delete_remote_file": True,
             "prefer_json": True,
+            "cookie_file": "",
         }
 
     @classmethod
@@ -3680,7 +3683,7 @@ class VideoParseConfigHandler:
             normalized[key] = max(0, cls._int_value(normalized.get(key), defaults[key]))
         for key in ("keep_temp", "delete_source_on_success", "delete_remote_file", "prefer_json"):
             normalized[key] = cls._bool_value(normalized.get(key))
-        for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir"):
+        for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir", "cookie_file"):
             normalized[key] = str(normalized.get(key) or "").strip()
         if not normalized["api_base"]:
             normalized["api_base"] = defaults["api_base"]
@@ -3691,6 +3694,77 @@ class VideoParseConfigHandler:
         if not normalized["prompt"]:
             normalized["prompt"] = defaults["prompt"]
         return normalized
+
+    @staticmethod
+    def _cookie_config_path() -> str:
+        workspace_root = conf().get("agent_workspace", "~/cow") or "~/cow"
+        workspace_root = os.path.expanduser(str(workspace_root))
+        config_dir = os.path.join(workspace_root, "config")
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "video_parse_cookies.txt")
+
+    @staticmethod
+    def _looks_like_netscape_cookies(content: str) -> tuple:
+        text = content.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not text:
+            return False, "Cookie 内容为空"
+
+        lines = text.split("\n")
+        has_header = any("Netscape HTTP Cookie File" in line for line in lines[:5])
+        cookie_lines = [
+            line for line in lines
+            if line.strip()
+            and (not line.lstrip().startswith("#") or line.lstrip().startswith("#HttpOnly_"))
+        ]
+        valid_rows = 0
+        for line in cookie_lines:
+            if line.startswith("#HttpOnly_"):
+                line = line[len("#HttpOnly_"):]
+            parts = line.split("\t")
+            if len(parts) != 7:
+                continue
+            domain, include_subdomains, path, secure, expires, name, value = parts
+            if (
+                domain
+                and path.startswith("/")
+                and include_subdomains.upper() in ("TRUE", "FALSE")
+                and secure.upper() in ("TRUE", "FALSE")
+                and name
+                and value is not None
+            ):
+                try:
+                    int(expires)
+                except Exception:
+                    continue
+                valid_rows += 1
+
+        if valid_rows:
+            return True, ""
+        if has_header:
+            return False, "缺少有效 Cookie 记录，Netscape 格式每行需要 7 个 Tab 分隔字段"
+        return False, "Cookie 文件格式不正确，请上传 Netscape HTTP Cookie File 格式"
+
+    @classmethod
+    def _write_cookie_file(cls, content: str) -> str:
+        ok, message = cls._looks_like_netscape_cookies(content)
+        if not ok:
+            raise ValueError(message)
+        path = cls._cookie_config_path()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content.replace("\r\n", "\n").replace("\r", "\n").strip() + "\n")
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+        return path
+
+    @classmethod
+    def _remove_cookie_file(cls, path: str) -> None:
+        path = str(path or "").strip()
+        managed_path = cls._cookie_config_path()
+        if path and os.path.abspath(os.path.expanduser(path)) == os.path.abspath(managed_path):
+            if os.path.isfile(managed_path):
+                os.remove(managed_path)
 
     @classmethod
     def _resolved_key(cls, cfg: dict) -> tuple:
@@ -3708,12 +3782,15 @@ class VideoParseConfigHandler:
     @classmethod
     def _health(cls, cfg: dict) -> dict:
         key, source = cls._resolved_key(cfg)
+        cookie_file = str(cfg.get("cookie_file") or "").strip()
         return {
-            "you_get": bool(shutil.which("you-get")),
+            "yt_dlp": bool(shutil.which("yt-dlp")),
             "ffmpeg": bool(shutil.which("ffmpeg")),
             "ffprobe": bool(shutil.which("ffprobe")),
             "gemini_key": bool(key),
             "gemini_key_source": source,
+            "cookie_file": bool(cookie_file and os.path.isfile(os.path.expanduser(cookie_file))),
+            "yt_dlp_install": cls.COOKIE_INSTALL_HINT,
         }
 
     @classmethod
@@ -3722,6 +3799,9 @@ class VideoParseConfigHandler:
         api_key = public.pop("api_key", "") or ""
         public["api_key_masked"] = cls._mask_key(api_key)
         public["api_key_configured"] = bool(api_key)
+        cookie_file = public.get("cookie_file", "") or ""
+        public["cookie_file_configured"] = bool(cookie_file and os.path.isfile(os.path.expanduser(cookie_file)))
+        public["cookie_file_name"] = os.path.basename(cookie_file) if cookie_file else ""
         return public
 
     @classmethod
@@ -3763,14 +3843,29 @@ class VideoParseConfigHandler:
             data = json.loads(web.data() or b"{}")
             action = (data.get("action") or "save").strip().lower()
             incoming = data.get("config") if isinstance(data.get("config"), dict) else {}
+            incoming.pop("cookie_file", None)
             cfg = self._merge_with_current(incoming)
             if data.get("api_key_clear") or incoming.get("api_key_clear"):
                 cfg["api_key"] = ""
+            cookie_content = incoming.get("cookie_content")
+
+            if action == "test" and isinstance(cookie_content, str) and cookie_content.strip():
+                ok, message = self._looks_like_netscape_cookies(cookie_content)
+                if not ok:
+                    return json.dumps({"status": "error", "message": message}, ensure_ascii=False)
+
+            if action == "save":
+                if data.get("cookie_clear") or incoming.get("cookie_clear"):
+                    self._remove_cookie_file(cfg.get("cookie_file", ""))
+                    cfg["cookie_file"] = ""
+                if isinstance(cookie_content, str) and cookie_content.strip():
+                    cfg["cookie_file"] = self._write_cookie_file(cookie_content)
+
             cfg = self._normalize_config(cfg)
 
             if action == "test":
                 health = self._health(cfg)
-                ok = all(bool(health.get(k)) for k in ("you_get", "ffmpeg", "ffprobe", "gemini_key"))
+                ok = all(bool(health.get(k)) for k in ("yt_dlp", "ffmpeg", "ffprobe", "gemini_key"))
                 return json.dumps({
                     "status": "success",
                     "ok": ok,

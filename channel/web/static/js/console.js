@@ -142,6 +142,11 @@ const I18N = {
         config_video_api_base: 'Gemini API Base',
         config_video_upload_api_base: 'Upload API Base',
         config_video_model: '模型',
+        config_video_cookies: 'yt-dlp Cookies',
+        config_video_cookies_hint: '粘贴 Netscape HTTP Cookie File 格式内容，保存后用于 yt-dlp --cookies。',
+        config_video_cookies_saved: '已保存 Cookies',
+        config_video_cookies_empty: '未配置 Cookies',
+        config_video_cookies_clear: '清除已保存 Cookies',
         config_video_prompt: 'Prompt',
         config_video_advanced: '高级配置',
         config_video_download_timeout: '下载超时',
@@ -394,6 +399,11 @@ const I18N = {
         config_video_api_base: 'Gemini API Base',
         config_video_upload_api_base: 'Upload API Base',
         config_video_model: 'Model',
+        config_video_cookies: 'yt-dlp Cookies',
+        config_video_cookies_hint: 'Paste Netscape HTTP Cookie File content. It will be used with yt-dlp --cookies after saving.',
+        config_video_cookies_saved: 'Cookies saved',
+        config_video_cookies_empty: 'No cookies configured',
+        config_video_cookies_clear: 'Clear saved cookies',
         config_video_prompt: 'Prompt',
         config_video_advanced: 'Advanced',
         config_video_download_timeout: 'Download timeout',
@@ -4377,6 +4387,16 @@ function showStatus(elId, msgKey, isError) {
     setTimeout(() => el.classList.add('opacity-0'), 2500);
 }
 
+function showStatusText(elId, message, isError) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = message || '';
+    el.classList.toggle('text-red-500', !!isError);
+    el.classList.toggle('text-primary-500', !isError);
+    el.classList.remove('opacity-0');
+    setTimeout(() => el.classList.add('opacity-0'), 3500);
+}
+
 function saveModelConfig() {
     const model = getSelectedModel();
     if (!model) return;
@@ -4715,14 +4735,46 @@ function updateVideoParseHealth(health) {
     const healthEl = document.getElementById('cfg-video-health');
     if (!healthEl) return;
     health = health || {};
-    const ok = !!(health.you_get && health.ffmpeg && health.ffprobe && health.gemini_key);
+    const ok = !!(health.yt_dlp && health.ffmpeg && health.ffprobe && health.gemini_key);
     const keyLabel = videoParseKeySourceLabel(health.gemini_key_source);
     const mark = (v) => v ? 'OK' : '--';
-    healthEl.textContent = `you-get ${mark(health.you_get)} · ffmpeg ${mark(health.ffmpeg)} · ffprobe ${mark(health.ffprobe)} · ${keyLabel}`;
+    let text = `yt-dlp ${mark(health.yt_dlp)} · ffmpeg ${mark(health.ffmpeg)} · ffprobe ${mark(health.ffprobe)} · ${keyLabel}`;
+    if (!health.yt_dlp && health.yt_dlp_install) {
+        text += ` · install: ${health.yt_dlp_install}`;
+    }
+    healthEl.textContent = text;
     healthEl.classList.toggle('text-primary-500', ok);
     healthEl.classList.toggle('text-red-500', !ok);
     healthEl.classList.toggle('text-slate-400', false);
     healthEl.classList.toggle('dark:text-slate-500', false);
+}
+
+function updateVideoCookieStatus(cfg) {
+    const statusEl = document.getElementById('cfg-video-cookie-status');
+    const cookieEl = document.getElementById('cfg-video-cookie-content');
+    const fileEl = document.getElementById('cfg-video-cookie-file');
+    const clearEl = document.getElementById('cfg-video-cookie-clear');
+    if (!statusEl) return;
+    const configured = cfg && cfg.cookie_file_configured === true;
+    statusEl.textContent = configured ? t('config_video_cookies_saved') : t('config_video_cookies_empty');
+    statusEl.classList.toggle('text-primary-500', configured);
+    statusEl.classList.toggle('text-slate-400', !configured);
+    statusEl.classList.toggle('dark:text-slate-500', !configured);
+    if (cookieEl) cookieEl.value = '';
+    if (fileEl) fileEl.value = '';
+    if (clearEl) clearEl.checked = false;
+}
+
+function onVideoCookieFileSelected(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        const cookieEl = document.getElementById('cfg-video-cookie-content');
+        if (cookieEl) cookieEl.value = String(reader.result || '');
+    };
+    reader.onerror = () => showStatusText('cfg-video-status', 'Cookie 文件读取失败', true);
+    reader.readAsText(file);
 }
 
 function initVideoParseConfigView(data) {
@@ -4740,6 +4792,7 @@ function initVideoParseConfigView(data) {
     setValue('cfg-video-api-base', cfg.api_base || 'https://generativelanguage.googleapis.com');
     setValue('cfg-video-upload-api-base', cfg.upload_api_base || cfg.api_base || 'https://generativelanguage.googleapis.com');
     setValue('cfg-video-model', cfg.model || 'gemini-2.5-flash');
+    updateVideoCookieStatus(cfg);
     setValue('cfg-video-prompt', cfg.prompt || '');
     setValue('cfg-video-download-timeout', cfg.download_timeout || 600);
     setValue('cfg-video-ffmpeg-timeout', cfg.ffmpeg_timeout || 300);
@@ -4778,6 +4831,13 @@ function collectVideoParseConfigPayload() {
     if (keyEl && keyEl.dataset.masked !== '1') {
         payload.api_key = keyEl.value.trim();
     }
+    const cookieContent = document.getElementById('cfg-video-cookie-content')?.value || '';
+    if (cookieContent.trim()) {
+        payload.cookie_content = cookieContent;
+    }
+    if (document.getElementById('cfg-video-cookie-clear')?.checked === true) {
+        payload.cookie_clear = true;
+    }
     return payload;
 }
 
@@ -4804,7 +4864,7 @@ function saveVideoParseConfig() {
             videoParseConfigState = data;
             initVideoParseConfigView(data);
         } else {
-            showStatus('cfg-video-status', 'config_save_error', true);
+            showStatusText('cfg-video-status', data.message || t('config_save_error'), true);
         }
     })
     .catch(() => showStatus('cfg-video-status', 'config_save_error', true))

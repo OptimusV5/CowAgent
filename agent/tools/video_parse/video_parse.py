@@ -61,7 +61,7 @@ class VideoParseTool(BaseTool):
         "Analyze, summarize, or extract information from a video link or uploaded/local video file. "
         "Use this whenever the user sends a video URL or video file and asks to understand, summarize, "
         "parse, describe, transcribe, or extract timeline/content from the video. "
-        "For URLs, the tool downloads with you-get, merges split audio/video with ffmpeg stream copy, "
+        "For URLs, the tool downloads with yt-dlp, merges split audio/video with ffmpeg stream copy, "
         "uploads the final video to Gemini Files API, and returns JSON/text analysis."
     )
 
@@ -116,7 +116,12 @@ class VideoParseTool(BaseTool):
 
             if url:
                 self.report_progress("正在下载视频...")
-                media_paths = self._download_video(url, work_dir, runtime["download_timeout"])
+                media_paths = self._download_video(
+                    url,
+                    work_dir,
+                    runtime["download_timeout"],
+                    runtime["cookie_file"],
+                )
             else:
                 local_source_path = self._resolve_local_path(file_path)
                 media_paths = [local_source_path]
@@ -230,6 +235,7 @@ class VideoParseTool(BaseTool):
             "delete_source_on_success": self._bool_value(cfg.get("delete_source_on_success", True)),
             "delete_remote_file": self._bool_value(cfg.get("delete_remote_file", True)),
             "prefer_json": self._bool_value(cfg.get("prefer_json", True)),
+            "cookie_file": str(cfg.get("cookie_file") or "").strip(),
         }
 
     def _resolve_input(self, args: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -263,9 +269,9 @@ class VideoParseTool(BaseTool):
             )
 
     def _validate_commands(self, url_required: bool) -> None:
-        if url_required and not shutil.which("you-get"):
+        if url_required and not shutil.which("yt-dlp"):
             raise VideoParseError(
-                "Missing dependency: you-get. Install project requirements or run: pip install you-get"
+                "Missing dependency: yt-dlp. Install it with: python3 -m pip install -U yt-dlp"
             )
         missing = [cmd for cmd in ("ffmpeg", "ffprobe") if not shutil.which(cmd)]
         if missing:
@@ -282,8 +288,20 @@ class VideoParseTool(BaseTool):
         os.makedirs(work_dir, exist_ok=True)
         return work_dir
 
-    def _download_video(self, url: str, work_dir: str, timeout: int) -> List[str]:
-        cmd = ["you-get", "-o", work_dir, url]
+    def _download_video(self, url: str, work_dir: str, timeout: int, cookie_file: str = "") -> List[str]:
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "-o",
+            os.path.join(work_dir, "%(title).200B.%(id)s.%(ext)s"),
+        ]
+        cookie_file = str(cookie_file or "").strip()
+        if cookie_file:
+            cookie_file = expand_path(cookie_file)
+            if not os.path.isfile(cookie_file):
+                raise VideoParseError(f"Configured yt-dlp cookie file not found: {cookie_file}")
+            cmd.extend(["--cookies", cookie_file])
+        cmd.append(url)
         logger.info(f"[VideoParse] Downloading video: {url} -> {work_dir}")
         try:
             completed = subprocess.run(
@@ -294,12 +312,12 @@ class VideoParseTool(BaseTool):
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            raise VideoParseError(f"you-get timed out after {timeout}s")
+            raise VideoParseError(f"yt-dlp timed out after {timeout}s")
 
         output = completed.stdout or ""
         if completed.returncode != 0:
             raise VideoParseError(
-                "you-get failed with exit code {}:\n{}".format(
+                "yt-dlp failed with exit code {}:\n{}".format(
                     completed.returncode,
                     self._tail(output),
                 )
@@ -308,7 +326,7 @@ class VideoParseTool(BaseTool):
         media_paths = self._scan_media_files(work_dir)
         if not media_paths:
             raise VideoParseError(
-                "you-get completed but no usable media file was found.\n{}".format(
+                "yt-dlp completed but no usable media file was found.\n{}".format(
                     self._tail(output)
                 )
             )

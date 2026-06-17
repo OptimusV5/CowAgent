@@ -791,6 +791,28 @@
                                                        placeholder="gemini-2.5-flash">
                                             </div>
                                         </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_cookies">yt-dlp Cookies</label>
+                                            <input id="cfg-video-cookie-file" type="file" accept=".txt,.cookies"
+                                                   class="mb-2 block w-full text-xs text-slate-500 dark:text-slate-400
+                                                          file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0
+                                                          file:bg-slate-100 dark:file:bg-white/10 file:text-slate-600 dark:file:text-slate-300
+                                                          file:cursor-pointer cursor-pointer"
+                                                   onchange="onVideoCookieFileSelected(this)">
+                                            <textarea id="cfg-video-cookie-content" rows="4"
+                                                      class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                             bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                             focus:outline-none focus:border-primary-500 font-mono transition-colors resize-y"
+                                                      placeholder="# Netscape HTTP Cookie File"></textarea>
+                                            <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+                                                <p id="cfg-video-cookie-status" class="text-xs text-slate-400 dark:text-slate-500" data-i18n="config_video_cookies_hint">粘贴 Netscape HTTP Cookie File 格式内容，保存后用于 yt-dlp --cookies。</p>
+                                                <label class="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer">
+                                                    <input id="cfg-video-cookie-clear" type="checkbox"
+                                                           class="rounded border-slate-300 dark:border-slate-600 text-primary-500 focus:ring-primary-500">
+                                                    <span data-i18n="config_video_cookies_clear">清除已保存 Cookies</span>
+                                                </label>
+                                            </div>
+                                        </div>
                                         <div class="grid md:grid-cols-2 gap-4">
                                             <div class="flex items-center justify-between md:justify-start md:gap-3">
                                                 <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_video_delete_source">成功后删除本地视频</span>

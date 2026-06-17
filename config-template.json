@@ -47,6 +47,7 @@
   "tools": {
     "video_parse": {
       "model": "gemini-2.5-flash",
+      "cookie_file": "",
       "keep_temp": false,
       "delete_source_on_success": true,
       "delete_remote_file": true
