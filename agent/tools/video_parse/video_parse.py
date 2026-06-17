@@ -318,6 +318,8 @@ class VideoParseTool(BaseTool):
             "yt-dlp",
             "--no-playlist",
             "--no-progress",
+            "-f",
+            "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*[vcodec^=avc1]+ba/b[ext=mp4]/b",
             "-o",
             os.path.join(work_dir, "%(id)s.%(ext)s"),
         ]
@@ -438,9 +440,25 @@ class VideoParseTool(BaseTool):
             path,
         ]
         try:
-            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=60)
-            data = json.loads(out.decode("utf-8", errors="replace") or "{}")
-        except Exception:
+            completed = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60,
+            )
+            stdout = completed.stdout.decode("utf-8", errors="replace").strip()
+            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+            if completed.returncode != 0:
+                logger.warning(
+                    f"[VideoParse] ffprobe exited with {completed.returncode} for {path}: "
+                    f"{self._tail(stderr or stdout, 500)}"
+                )
+                return None
+            data = json.loads(stdout or "{}")
+            if stderr:
+                logger.debug(f"[VideoParse] ffprobe diagnostics for {path}: {self._tail(stderr, 500)}")
+        except Exception as e:
+            logger.warning(f"[VideoParse] ffprobe parse failed for {path}: {e}")
             return None
 
         streams = data.get("streams") or []
