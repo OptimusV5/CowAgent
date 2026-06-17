@@ -226,7 +226,7 @@ class VideoParseTool(BaseTool):
                 self._remove_dir(work_dir)
 
     def _runtime_config(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        cfg = self.config or {}
+        cfg = self._latest_tool_config()
         api_base = (
             cfg.get("api_base")
             or os.environ.get("GEMINI_API_BASE")
@@ -262,6 +262,21 @@ class VideoParseTool(BaseTool):
             "prefer_json": self._bool_value(cfg.get("prefer_json", True)),
             "cookie_file": str(cfg.get("cookie_file") or "").strip(),
         }
+
+    def _latest_tool_config(self) -> Dict[str, Any]:
+        cfg: Dict[str, Any] = {}
+        if isinstance(self.config, dict):
+            cfg.update(self.config)
+
+        try:
+            tools_cfg = conf().get("tools", {})
+            if isinstance(tools_cfg, dict) and isinstance(tools_cfg.get("video_parse"), dict):
+                cfg.update(tools_cfg["video_parse"])
+        except Exception as e:
+            logger.debug(f"[VideoParse] Failed to refresh runtime config from conf(): {e}")
+
+        self.config = cfg
+        return cfg
 
     def _resolve_input(self, args: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         url = (args.get("url") or "").strip()
