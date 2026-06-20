@@ -325,6 +325,13 @@ if [ -f "${BASE_DIR}/config-template.json" ] && [ -f "${BASE_DIR}/app.py" ]; the
     IS_PROJECT_DIR=true
 fi
 
+refresh_venv_paths() {
+    export VENV_DIR="${BASE_DIR}/.venv"
+    export VENV_PYTHON="${VENV_DIR}/bin/python"
+    export VENV_COW="${VENV_DIR}/bin/cow"
+}
+refresh_venv_paths
+
 # Check and install tool
 check_and_install_tool() {
     local tool_name=$1
@@ -398,12 +405,48 @@ detect_python_command() {
     echo -e "${GREEN}✅ Found Python: $PYTHON_CMD (version $PYTHON_VERSION)${NC}"
 }
 
-# Check Python version (>= 3.7)
+# Check Python version (>= 3.7) and make the project virtualenv the active
+# Python for all install/start operations. This avoids Debian/Ubuntu's
+# externally-managed Python restriction without using --break-system-packages.
 check_python_version() {
-    detect_python_command
-    
-    # Verify pip is available
-    if ! $PYTHON_CMD -m pip --version &> /dev/null; then
+    refresh_venv_paths
+
+    if [ -x "$VENV_PYTHON" ]; then
+        PYTHON_CMD="$VENV_PYTHON"
+        PYTHON_VERSION=$("$PYTHON_CMD" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null)
+        export PYTHON_CMD
+        export PYTHON_VERSION
+        echo -e "${GREEN}✅ Using project virtualenv: $VENV_DIR (Python $PYTHON_VERSION)${NC}"
+    else
+        detect_python_command
+        echo -e "${YELLOW}Creating project virtualenv: $VENV_DIR${NC}"
+        set +e
+        "$PYTHON_CMD" -m venv "$VENV_DIR" > /tmp/cow_venv_create.log 2>&1
+        local venv_exit=$?
+        set -e
+        if [ $venv_exit -ne 0 ]; then
+            cat /tmp/cow_venv_create.log
+            rm -f /tmp/cow_venv_create.log
+            echo -e "${RED}❌ Failed to create Python virtualenv.${NC}"
+            if command -v apt-get &> /dev/null; then
+                echo -e "${YELLOW}Please install venv support and retry:${NC}"
+                echo -e "${YELLOW}  sudo apt update && sudo apt install -y python3-full python3-venv${NC}"
+            else
+                echo -e "${YELLOW}Please install Python venv support for your system and retry.${NC}"
+            fi
+            exit 1
+        fi
+        rm -f /tmp/cow_venv_create.log
+
+        PYTHON_CMD="$VENV_PYTHON"
+        PYTHON_VERSION=$("$PYTHON_CMD" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null)
+        export PYTHON_CMD
+        export PYTHON_VERSION
+        echo -e "${GREEN}✅ Virtualenv created: $VENV_DIR (Python $PYTHON_VERSION)${NC}"
+    fi
+
+    # Verify pip is available inside the virtualenv.
+    if ! "$PYTHON_CMD" -m pip --version &> /dev/null; then
         echo -e "${RED}❌ pip not found for $PYTHON_CMD. Please install pip.${NC}"
         exit 1
     fi
@@ -490,6 +533,7 @@ clone_project() {
 
     cd CowAgent || { echo -e "${RED}❌ Failed to enter project directory.${NC}"; exit 1; }
     export BASE_DIR=$(pwd)
+    refresh_venv_paths
     echo -e "${GREEN}✅ Project cloned successfully: $BASE_DIR${NC}"
     
     # Add execute permission to management script
@@ -504,49 +548,47 @@ clone_project() {
 # Install dependencies
 install_dependencies() {
     echo -e "${GREEN}📦 Installing dependencies...${NC}"
+    refresh_venv_paths
+    if [ ! -x "$VENV_PYTHON" ] || [ "$PYTHON_CMD" != "$VENV_PYTHON" ]; then
+        check_python_version
+    fi
+
     # Pick the pip index by install language, then fall back to the other if the
     # preferred one is unreachable:
     #   - zh users: Tsinghua mirror first (fast in China), official PyPI fallback
     #   - others : official PyPI first, Tsinghua mirror fallback
     local PIP_MIRROR=""
+    local PIP_MIRROR_URL=""
     local _tuna="https://pypi.tuna.tsinghua.edu.cn/simple"
     local _pypi="https://pypi.org/simple"
     if [ "$UI_LANG" = "zh" ]; then
         # Prefer Tsinghua; if it's down, fall back to official PyPI (pip default).
         if curl -s --connect-timeout 5 "${_tuna}/" > /dev/null 2>&1; then
             PIP_MIRROR="-i $_tuna"
+            PIP_MIRROR_URL="$_tuna"
         fi
     else
         # Prefer official PyPI; only use Tsinghua if PyPI is unreachable.
         if ! curl -s --connect-timeout 5 "${_pypi}/" > /dev/null 2>&1 \
            && curl -s --connect-timeout 5 "${_tuna}/" > /dev/null 2>&1; then
             PIP_MIRROR="-i $_tuna"
+            PIP_MIRROR_URL="$_tuna"
         fi
     fi
     if [ -n "$PIP_MIRROR" ]; then
-        echo -e "${YELLOW}Using pip mirror: ${_tuna}${NC}"
-    fi
-
-    # Only pass --break-system-packages if this pip actually supports it
-    # (pip >= 23.x). Older pip versions error out with "no such option",
-    # which previously dumped a confusing usage message and failed the install.
-    PIP_EXTRA_ARGS=""
-    if $PYTHON_CMD -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null \
-       && $PYTHON_CMD -m pip install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
-        PIP_EXTRA_ARGS="--break-system-packages"
-        echo -e "${YELLOW}Python 3.11+ with break-system-packages support detected${NC}"
+        echo -e "${YELLOW}Using pip mirror: ${PIP_MIRROR_URL}${NC}"
     fi
 
     echo -e "${YELLOW}Upgrading pip and basic tools...${NC}"
     set +e
-    $PYTHON_CMD -m pip install --upgrade pip setuptools wheel importlib_metadata --ignore-installed $PIP_EXTRA_ARGS $PIP_MIRROR > /tmp/pip_upgrade.log 2>&1
+    "$PYTHON_CMD" -m pip install --upgrade pip setuptools wheel importlib_metadata --ignore-installed $PIP_MIRROR > /tmp/pip_upgrade.log 2>&1
     [ $? -ne 0 ] && echo -e "${YELLOW}⚠️  Some tools failed to upgrade, but continuing...${NC}"
     set -e
     rm -f /tmp/pip_upgrade.log
 
     echo -e "${YELLOW}Installing project dependencies...${NC}"
     set +e
-    $PYTHON_CMD -m pip install -r requirements.txt $PIP_EXTRA_ARGS $PIP_MIRROR > /tmp/pip_install.log 2>&1
+    "$PYTHON_CMD" -m pip install -r requirements.txt $PIP_MIRROR > /tmp/pip_install.log 2>&1
     local exit_code=$?
     set -e
     cat /tmp/pip_install.log
@@ -560,15 +602,8 @@ install_dependencies() {
             IGNORE_PACKAGES="$IGNORE_PACKAGES --ignore-installed $pkg"
         done
         set +e
-        $PYTHON_CMD -m pip install -r requirements.txt $IGNORE_PACKAGES $PIP_EXTRA_ARGS $PIP_MIRROR \
+        "$PYTHON_CMD" -m pip install -r requirements.txt $IGNORE_PACKAGES $PIP_MIRROR \
             && echo -e "${GREEN}✅ Dependencies installed successfully (workaround applied).${NC}" \
-            || echo -e "${YELLOW}⚠️  Some dependencies may have issues, but continuing...${NC}"
-        set -e
-    elif grep -q "externally-managed-environment" /tmp/pip_install.log; then
-        echo -e "${YELLOW}⚠️  Detected externally-managed environment, retrying with --break-system-packages...${NC}"
-        set +e
-        $PYTHON_CMD -m pip install -r requirements.txt --break-system-packages $PIP_MIRROR \
-            && echo -e "${GREEN}✅ Dependencies installed successfully (system packages override applied).${NC}" \
             || echo -e "${YELLOW}⚠️  Some dependencies may have issues, but continuing...${NC}"
         set -e
     else
@@ -580,13 +615,57 @@ install_dependencies() {
     # Register `cow` CLI command via editable install
     echo -e "${YELLOW}Registering cow CLI...${NC}"
     set +e
-    $PYTHON_CMD -m pip install -e . $PIP_EXTRA_ARGS $PIP_MIRROR > /dev/null 2>&1
-    if command -v cow &> /dev/null; then
-        echo -e "${GREEN}✅ cow CLI registered.${NC}"
-    else
-        echo -e "${YELLOW}⚠️  cow CLI not in PATH, you can still use: $PYTHON_CMD -m cli.cli${NC}"
-    fi
+    "$PYTHON_CMD" -m pip install -e . $PIP_MIRROR > /tmp/cow_cli_install.log 2>&1
+    local cli_exit=$?
     set -e
+    if [ $cli_exit -ne 0 ]; then
+        cat /tmp/cow_cli_install.log
+        echo -e "${YELLOW}⚠️  cow CLI registration had errors, but continuing...${NC}"
+    fi
+    rm -f /tmp/cow_cli_install.log
+
+    if [ -x "$VENV_COW" ]; then
+        echo -e "${GREEN}✅ cow CLI registered in virtualenv: $VENV_COW${NC}"
+        install_global_cow_link
+    else
+        echo -e "${YELLOW}⚠️  cow CLI not found in virtualenv, you can still use: $PYTHON_CMD -m cli.cli${NC}"
+    fi
+}
+
+install_global_cow_link() {
+    refresh_venv_paths
+    [ -x "$VENV_COW" ] || return 0
+
+    local link_path="${COW_GLOBAL_BIN:-/usr/local/bin/cow}"
+    local link_dir
+    link_dir=$(dirname "$link_path")
+
+    echo -e "${YELLOW}Installing global cow command: ${link_path}${NC}"
+    set +e
+    if [ ! -d "$link_dir" ]; then
+        if [ -w "$(dirname "$link_dir")" ]; then
+            mkdir -p "$link_dir"
+        elif command -v sudo &> /dev/null; then
+            sudo mkdir -p "$link_dir"
+        fi
+    fi
+
+    if [ -w "$link_dir" ]; then
+        ln -sfn "$VENV_COW" "$link_path"
+    elif command -v sudo &> /dev/null; then
+        sudo ln -sfn "$VENV_COW" "$link_path"
+    fi
+    local link_exit=$?
+    hash -r 2>/dev/null || true
+    set -e
+
+    if [ $link_exit -eq 0 ] && command -v cow &> /dev/null; then
+        echo -e "${GREEN}✅ Global cow command ready: $(command -v cow)${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Could not install global cow command automatically.${NC}"
+        echo -e "${YELLOW}    You can use: ${VENV_COW}${NC}"
+        echo -e "${YELLOW}    Or create the link manually: sudo ln -sfn '${VENV_COW}' '${link_path}'${NC}"
+    fi
 }
 
 # Select model
@@ -848,7 +927,7 @@ create_config_file() {
     SLACK_APP_TOKEN="${SLACK_APP_TOKEN:-}" \
     DISCORD_TOKEN="${DISCORD_TOKEN:-}" \
     COW_LANG="${INSTALL_LANG:-auto}" \
-    $PYTHON_CMD -c "
+    "$PYTHON_CMD" -c "
 import json, os
 e = os.environ.get
 base = {
@@ -925,13 +1004,14 @@ start_project() {
     sleep 1
 
     local USE_COW=false
-    if command -v cow &> /dev/null; then
+    local COW_CMD=""
+    if COW_CMD=$(cow_command 2>/dev/null); then
         USE_COW=true
     fi
 
     if $USE_COW; then
         cd "${BASE_DIR}"
-        cow start --no-logs
+        "$COW_CMD" start --no-logs
     else
         if [ ! -f "${BASE_DIR}/nohup.out" ]; then
             touch "${BASE_DIR}/nohup.out"
@@ -940,10 +1020,10 @@ start_project() {
         OS_TYPE=$(uname)
 
         if [[ "$OS_TYPE" == "Linux" ]]; then
-            nohup setsid $PYTHON_CMD "${BASE_DIR}/app.py" > "${BASE_DIR}/nohup.out" 2>&1 &
+            nohup setsid "$PYTHON_CMD" "${BASE_DIR}/app.py" > "${BASE_DIR}/nohup.out" 2>&1 &
             echo -e "${GREEN}${EMOJI_COW} CowAgent started on Linux (using $PYTHON_CMD)${NC}"
         elif [[ "$OS_TYPE" == "Darwin" ]]; then
-            nohup $PYTHON_CMD "${BASE_DIR}/app.py" > "${BASE_DIR}/nohup.out" 2>&1 &
+            nohup "$PYTHON_CMD" "${BASE_DIR}/app.py" > "${BASE_DIR}/nohup.out" 2>&1 &
             echo -e "${GREEN}${EMOJI_COW} CowAgent started on macOS (using $PYTHON_CMD)${NC}"
         else
             echo -e "${RED}❌ Unsupported OS: ${OS_TYPE}${NC}"
@@ -1021,7 +1101,13 @@ show_usage() {
 # Ensure PYTHON_CMD is set
 ensure_python_cmd() {
     if [ -z "$PYTHON_CMD" ]; then
-        detect_python_command > /dev/null 2>&1 || PYTHON_CMD="python3"
+        refresh_venv_paths
+        if [ -x "$VENV_PYTHON" ]; then
+            PYTHON_CMD="$VENV_PYTHON"
+            export PYTHON_CMD
+        else
+            detect_python_command > /dev/null 2>&1 || PYTHON_CMD="python3"
+        fi
     fi
 }
 
@@ -1038,7 +1124,16 @@ is_running() {
 
 # Check if cow CLI is available
 has_cow() {
-    command -v cow &> /dev/null
+    cow_command > /dev/null 2>&1
+}
+
+cow_command() {
+    refresh_venv_paths
+    if [ -x "$VENV_COW" ]; then
+        printf '%s\n' "$VENV_COW"
+        return 0
+    fi
+    command -v cow 2>/dev/null
 }
 
 # Start service
@@ -1049,9 +1144,10 @@ cmd_start() {
         exit 1
     fi
 
-    if has_cow; then
+    local COW_CMD=""
+    if COW_CMD=$(cow_command 2>/dev/null); then
         cd "${BASE_DIR}"
-        cow start
+        "$COW_CMD" start
     else
         if is_running; then
             echo -e "${YELLOW}${EMOJI_WARN} $(t "CowAgent 已在运行中" "CowAgent is already running") (PID: $(get_pid))${NC}"
@@ -1068,9 +1164,10 @@ cmd_stop() {
     # Don't let kill/return non-zero (e.g. process already gone) abort the
     # caller (cmd_restart) under `set -e`.
     set +e
-    if has_cow; then
+    local COW_CMD=""
+    if COW_CMD=$(cow_command 2>/dev/null); then
         cd "${BASE_DIR}"
-        cow stop
+        "$COW_CMD" stop
     else
         echo -e "${GREEN}${EMOJI_STOP} $(t "正在停止 CowAgent" "Stopping CowAgent")...${NC}"
 
@@ -1101,9 +1198,10 @@ cmd_stop() {
 
 # Restart service
 cmd_restart() {
-    if has_cow; then
+    local COW_CMD=""
+    if COW_CMD=$(cow_command 2>/dev/null); then
         cd "${BASE_DIR}"
-        cow restart
+        "$COW_CMD" restart
     else
         cmd_stop
         sleep 1
@@ -1113,9 +1211,10 @@ cmd_restart() {
 
 # Check status
 cmd_status() {
-    if has_cow; then
+    local COW_CMD=""
+    if COW_CMD=$(cow_command 2>/dev/null); then
         cd "${BASE_DIR}"
-        cow status
+        "$COW_CMD" status
     else
         echo -e "${CYAN}${BOLD}=========================================${NC}"
         echo -e "${CYAN}${BOLD}   ${EMOJI_COW} CowAgent Status${NC}"
@@ -1146,9 +1245,10 @@ cmd_status() {
 
 # View logs
 cmd_logs() {
-    if has_cow; then
+    local COW_CMD=""
+    if COW_CMD=$(cow_command 2>/dev/null); then
         cd "${BASE_DIR}"
-        cow logs -f
+        "$COW_CMD" logs -f
     else
         if [ -f "${BASE_DIR}/nohup.out" ]; then
             echo -e "${YELLOW}$(t "查看日志（Ctrl+C 退出）" "Viewing logs (Ctrl+C to exit)"):${NC}"
@@ -1266,6 +1366,14 @@ install_mode() {
         echo -e "${GREEN}✅ $(t "检测到已有项目目录" "Detected existing project directory").${NC}"
         
         if [ -f "${BASE_DIR}/config.json" ]; then
+            refresh_venv_paths
+            if [ ! -x "$VENV_COW" ]; then
+                echo -e "${YELLOW}$(t "检测到项目已配置，但运行环境尚未安装，开始安装依赖" "Project is configured, but runtime is not installed yet. Installing dependencies")...${NC}"
+                check_python_version
+                install_dependencies
+            else
+                install_global_cow_link
+            fi
             menu_session_end
             echo -e "${GREEN}✅ $(t "项目已配置" "Project already configured")${NC}"
             echo ""
@@ -1280,7 +1388,7 @@ install_mode() {
         check_python_version
     else
         # Remote install mode, need to clone project
-        check_python_version
+        detect_python_command
         clone_project
     fi
     
