@@ -29,7 +29,7 @@ available_setting = {
     # Multiple custom (OpenAI-compatible) providers. Activated via bot_type: "custom:<id>".
     # Each item: {"id": "3f2a9c1b", "name": "siliconflow", "api_key": "sk-...", "api_base": "https://api.siliconflow.cn/v1", "model": "deepseek-ai/DeepSeek-V3"}
     "custom_providers": [],
-    "proxy": "",  # proxy used by openai
+    "proxy": "",  # proxy used by model API requests, e.g. http://127.0.0.1:7890 or socks5h://127.0.0.1:1080
     # chatgpt model; when use_azure_chatgpt is true, this is the Azure model deployment name
     "model": "gpt-3.5-turbo",  # options: gpt-4o, gpt-4o-mini, gpt-4-turbo, claude-3-sonnet, wenxin, moonshot, qwen-turbo, xunfei, glm-4, minimax, gemini, etc. See common/const.py for the full list
     "bot_type": "",  # optional; for OpenAI-compatible third-party services set "openai" or "custom" (in custom mode switching model won't auto-switch bot_type). See common/const.py for bot names; inferred from model name if left empty
@@ -122,6 +122,7 @@ available_setting = {
     "voice_to_text": "openai",  # speech recognition engine: openai,baidu,google,azure,xunfei,ali
     "voice_to_text_api_key": "",  # optional ASR-specific OpenAI-compatible api key; falls back to open_ai_api_key
     "voice_to_text_api_base": "",  # optional ASR-specific OpenAI-compatible api base; falls back to open_ai_api_base
+    "voice_to_text_proxy": "",  # optional ASR-specific proxy; falls back to no proxy
     "text_to_voice": "openai",  # TTS engine: openai,baidu,google,azure,xunfei,ali,pytts(offline),elevenlabs,edge(online)
     "text_to_voice_model": "tts-1",
     "tts_voice_id": "alloy",

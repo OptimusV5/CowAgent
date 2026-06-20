@@ -5,6 +5,7 @@ import json
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from voice.voice import Voice
 import requests
@@ -39,7 +40,13 @@ class OpenaiVoice(Voice):
                 # Override via `voice_to_text_model` (e.g. fall back to whisper-1).
                 "model": conf().get("voice_to_text_model") or "gpt-4o-mini-transcribe",
             }
-            response = requests.post(url, headers=headers, files=files, data=data)
+            response = requests.post(
+                url,
+                headers=headers,
+                files=files,
+                data=data,
+                proxies=config_proxy_dict("voice_to_text_proxy"),
+            )
             response_data = response.json()
             if response.status_code != 200 or "text" not in response_data:
                 logger.error(
@@ -70,7 +77,7 @@ class OpenaiVoice(Voice):
                 'input': text,
                 'voice': conf().get("tts_voice_id") or "alloy"
             }
-            response = requests.post(url, headers=headers, json=data)
+            response = requests.post(url, headers=headers, json=data, proxies=config_proxy_dict("proxy"))
             file_name = "tmp/" + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + str(random.randint(0, 1000)) + ".mp3"
             logger.debug(f"[OPENAI] text_to_Voice file_name={file_name}, input={text}")
             with open(file_name, 'wb') as f:

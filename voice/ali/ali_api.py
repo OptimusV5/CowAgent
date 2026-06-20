@@ -20,6 +20,7 @@ import urllib.parse
 import uuid
 
 from common.log import logger
+from common.proxy import config_proxy_dict
 from common.tmp_dir import TmpDir
 
 
@@ -47,7 +48,7 @@ def text_to_speech_aliyun(url, text, appkey, token):
         "format": "wav"
     }
 
-    response = requests.post(url, headers=headers, data=json.dumps(data))
+    response = requests.post(url, headers=headers, data=json.dumps(data), proxies=config_proxy_dict("proxy"))
 
     if response.status_code == 200 and response.headers['Content-Type'] == 'audio/mpeg':
         output_file = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".wav"
@@ -211,6 +212,6 @@ class AliyunTokenGenerator:
         url = 'http://nls-meta.cn-shanghai.aliyuncs.com/?' + urllib.parse.urlencode(params)
 
         # 发送请求
-        response = requests.get(url)
+        response = requests.get(url, proxies=config_proxy_dict("proxy"))
 
         return response.text

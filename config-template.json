@@ -2,6 +2,7 @@
   "cow_lang": "auto",
   "channel_type": "web",
   "model": "deepseek-v4-flash",
+  "proxy": "",
   "deepseek_api_key": "",
   "deepseek_api_base": "https://api.deepseek.com/v1",
   "qianfan_api_key": "",
@@ -20,6 +21,7 @@
   "voice_to_text": "",
   "voice_to_text_api_key": "",
   "voice_to_text_api_base": "",
+  "voice_to_text_proxy": "",
   "text_to_voice": "",
   "voice_reply_voice": false,
   "speech_recognition": true,
@@ -45,9 +47,14 @@
   "knowledge": true,
   "self_evolution_enabled": true,
   "tools": {
+    "browser": {
+      "engine": "playwright",
+      "backend_proxy": ""
+    },
     "video_parse": {
       "model": "gemini-2.5-flash",
       "cookie_file": "",
+      "proxy": "",
       "keep_temp": false,
       "delete_source_on_success": true,
       "delete_remote_file": true

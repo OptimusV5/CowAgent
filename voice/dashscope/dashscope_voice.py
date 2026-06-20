@@ -12,6 +12,7 @@ from dashscope import MultiModalConversation
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from voice import audio_convert
 from voice.voice import Voice
@@ -128,7 +129,7 @@ class DashScopeVoice(Voice):
             if ext not in (".mp3", ".wav", ".m4a", ".aac", ".opus"):
                 ext = ".wav"
             dst = os.path.join(tmp_dir, f"dashscope_tts_{ts}_{random.randint(0, 9999)}{ext}")
-            resp = requests.get(url, timeout=60)
+            resp = requests.get(url, timeout=60, proxies=config_proxy_dict("proxy"))
             resp.raise_for_status()
             with open(dst, "wb") as f:
                 f.write(resp.content)

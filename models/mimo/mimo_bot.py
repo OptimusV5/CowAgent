@@ -29,6 +29,7 @@ from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common import const
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf, load_config
 from models.bot import Bot
 from models.openai_compatible_bot import OpenAICompatibleBot
@@ -168,6 +169,7 @@ class MimoBot(Bot, OpenAICompatibleBot):
                 headers=headers,
                 json=body,
                 timeout=180,
+                proxies=config_proxy_dict("proxy"),
             )
             if res.status_code == 200:
                 response = res.json()
@@ -299,7 +301,14 @@ class MimoBot(Bot, OpenAICompatibleBot):
         try:
             headers = self._build_headers()
             url = f"{self.api_base}/chat/completions"
-            response = requests.post(url, headers=headers, json=request_body, stream=True, timeout=180)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                stream=True,
+                timeout=180,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 error_msg = response.text
@@ -413,7 +422,13 @@ class MimoBot(Bot, OpenAICompatibleBot):
             headers = self._build_headers()
             request_body.pop("stream", None)
             url = f"{self.api_base}/chat/completions"
-            response = requests.post(url, headers=headers, json=request_body, timeout=180)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=180,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 error_msg = response.text
@@ -643,7 +658,10 @@ class MimoBot(Bot, OpenAICompatibleBot):
             headers = self._build_headers()
             resp = requests.post(
                 f"{self.api_base}/chat/completions",
-                headers=headers, json=payload, timeout=180,
+                headers=headers,
+                json=payload,
+                timeout=180,
+                proxies=config_proxy_dict("proxy"),
             )
             if resp.status_code != 200:
                 return {"error": True, "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}

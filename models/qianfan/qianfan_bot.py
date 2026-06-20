@@ -7,6 +7,7 @@ from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common import const
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf, load_config
 from models.bot import Bot
 from models.openai_compatible_bot import OpenAICompatibleBot
@@ -137,6 +138,7 @@ class QianfanBot(Bot, OpenAICompatibleBot):
                 headers=self._build_headers(),
                 json=body,
                 timeout=conf().get("request_timeout", 180),
+                proxies=config_proxy_dict("proxy"),
             )
             if response.status_code == 200:
                 data = response.json()
@@ -175,6 +177,7 @@ class QianfanBot(Bot, OpenAICompatibleBot):
                 headers=self._build_headers(),
                 json=payload,
                 timeout=conf().get("request_timeout", 180),
+                proxies=config_proxy_dict("proxy"),
             )
             if response.status_code != 200:
                 err = self._error_result(response, None)

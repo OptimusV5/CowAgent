@@ -7,6 +7,7 @@ import requests
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from voice.voice import Voice
 
@@ -52,7 +53,14 @@ class MinimaxVoice(Voice):
                 },
             }
 
-            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=60,
+                proxies=config_proxy_dict("proxy"),
+            )
             response.raise_for_status()
 
             # MiniMax returns HTTP 200 even on errors; capture base_resp for diagnostics.

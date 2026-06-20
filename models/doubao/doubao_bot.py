@@ -10,6 +10,7 @@ from models.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf, load_config
 from .doubao_session import DoubaoSession
 
@@ -106,7 +107,8 @@ class DoubaoBot(Bot):
             res = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,
-                json=body
+                json=body,
+                proxies=config_proxy_dict("proxy"),
             )
             if res.status_code == 200:
                 response = res.json()
@@ -170,7 +172,8 @@ class DoubaoBot(Bot):
                 "Content-Type": "application/json",
             }
             resp = requests.post(f"{self.base_url}/chat/completions",
-                                 headers=headers, json=payload, timeout=180)
+                                 headers=headers, json=payload, timeout=180,
+                                 proxies=config_proxy_dict("proxy"))
             if resp.status_code != 200:
                 return {"error": True, "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}
             data = resp.json()
@@ -279,7 +282,14 @@ class DoubaoBot(Bot):
             }
 
             url = f"{self.base_url}/chat/completions"
-            response = requests.post(url, headers=headers, json=request_body, stream=True, timeout=120)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                stream=True,
+                timeout=120,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 error_msg = response.text
@@ -407,7 +417,13 @@ class DoubaoBot(Bot):
 
             request_body.pop("stream", None)
             url = f"{self.base_url}/chat/completions"
-            response = requests.post(url, headers=headers, json=request_body, timeout=120)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=120,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 error_msg = response.text

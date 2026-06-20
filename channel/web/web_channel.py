@@ -23,6 +23,7 @@ from collections import OrderedDict
 from common import const
 from common import i18n
 from common.log import logger
+from common.proxy import mask_proxy_url, normalize_proxy_url, proxy_dict
 from common.singleton import singleton
 from config import conf
 
@@ -1606,6 +1607,7 @@ class ConfigHandler:
     EDITABLE_KEYS = {
         "cow_lang",
         "model", "bot_type", "use_linkai",
+        "proxy", "voice_to_text_proxy",
         "open_ai_api_base", "voice_to_text_api_base", "deepseek_api_base", "qianfan_api_base", "claude_api_base", "gemini_api_base",
         "zhipu_ai_api_base", "moonshot_base_url", "ark_base_url", "custom_api_base", "mimo_api_base",
         "open_ai_api_key", "voice_to_text_api_key", "deepseek_api_key", "qianfan_api_key", "claude_api_key", "gemini_api_key",
@@ -1698,6 +1700,8 @@ class ConfigHandler:
                 "api_bases": api_bases,
                 "api_keys": api_keys_masked,
                 "providers": providers,
+                "proxy": mask_proxy_url(local_config.get("proxy", "")),
+                "proxy_configured": bool(local_config.get("proxy", "")),
                 "web_password_masked": masked_pwd,
             }, ensure_ascii=False)
         except Exception as e:
@@ -1718,6 +1722,11 @@ class ConfigHandler:
             for key, value in updates.items():
                 if key not in self.EDITABLE_KEYS:
                     continue
+                if key in ("proxy", "voice_to_text_proxy"):
+                    try:
+                        value = normalize_proxy_url(value)
+                    except ValueError as proxy_err:
+                        return json.dumps({"status": "error", "message": str(proxy_err)})
                 if key in ("agent_max_context_tokens", "agent_max_context_turns", "agent_max_steps"):
                     value = int(value)
                 if key in ("use_linkai", "enable_thinking", "self_evolution_enabled"):
@@ -1740,6 +1749,10 @@ class ConfigHandler:
                 json.dump(file_cfg, f, indent=4, ensure_ascii=False)
 
             logger.info(f"[WebChannel] Config updated: {list(applied.keys())}")
+            response_applied = dict(applied)
+            for proxy_key in ("proxy", "voice_to_text_proxy"):
+                if proxy_key in response_applied:
+                    response_applied[proxy_key] = mask_proxy_url(response_applied[proxy_key])
 
             # Apply a language change immediately so backend logs, agent
             # replies and CLI output switch without a restart.
@@ -1753,7 +1766,7 @@ class ConfigHandler:
             # Reset Bridge so that bot routing reflects the new config.
             # Without this, Bridge keeps its cached bot instance (e.g. LinkAIBot)
             # even after the user switches bot_type / use_linkai / model in UI.
-            bridge_routing_keys = {"bot_type", "use_linkai", "model"}
+            bridge_routing_keys = {"bot_type", "use_linkai", "model", "proxy"}
             if any(k in applied for k in bridge_routing_keys):
                 try:
                     from bridge.bridge import Bridge
@@ -1762,7 +1775,15 @@ class ConfigHandler:
                 except Exception as reset_err:
                     logger.warning(f"[WebChannel] Failed to reset bridge: {reset_err}")
 
-            return json.dumps({"status": "success", "applied": applied}, ensure_ascii=False)
+            if "voice_to_text_proxy" in applied:
+                try:
+                    from bridge.bridge import Bridge
+                    Bridge().refresh_voice()
+                    logger.info("[WebChannel] Bridge voice routing refreshed due to ASR proxy change")
+                except Exception as voice_err:
+                    logger.warning(f"[WebChannel] Failed to refresh voice routing: {voice_err}")
+
+            return json.dumps({"status": "success", "applied": response_applied}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error updating config: {e}")
             return json.dumps({"status": "error", "message": str(e)})
@@ -2463,6 +2484,7 @@ class ModelsHandler:
         explicit = (local_config.get("voice_to_text") or "").strip().lower()
         asr_openai_key = local_config.get("voice_to_text_api_key", "")
         asr_openai_base = local_config.get("voice_to_text_api_base", "")
+        asr_proxy = local_config.get("voice_to_text_proxy", "")
         asr_openai_configured = cls._is_real_key(asr_openai_key)
         openai_meta = ConfigHandler.PROVIDER_MODELS.get("openai") or {}
         suggested = ""
@@ -2496,6 +2518,8 @@ class ModelsHandler:
                     "api_base_placeholder": openai_meta.get("api_base_placeholder") or ConfigHandler._PLACEHOLDER_V1,
                 },
             },
+            "proxy_masked": mask_proxy_url(asr_proxy),
+            "proxy_configured": bool(asr_proxy),
         }
 
     @classmethod
@@ -3246,6 +3270,14 @@ class ModelsHandler:
                 api_key = (api_key or "").strip()
                 local_config["voice_to_text_api_key"] = api_key
                 file_cfg["voice_to_text_api_key"] = api_key
+        if "asr_proxy" in data or "voice_to_text_proxy" in data:
+            proxy_value = data.get("asr_proxy") if "asr_proxy" in data else data.get("voice_to_text_proxy")
+            try:
+                proxy_value = normalize_proxy_url(proxy_value or "")
+            except ValueError as proxy_err:
+                return json.dumps({"status": "error", "message": str(proxy_err)})
+            local_config["voice_to_text_proxy"] = proxy_value
+            file_cfg["voice_to_text_proxy"] = proxy_value
         self._write_file_config(file_cfg)
         logger.info(
             f"[ModelsHandler] asr updated: provider={provider_id!r} "
@@ -3382,6 +3414,7 @@ class BrowserConfigHandler:
                 "user_id": "cow-agent",
                 "session_key": "default",
             },
+            "backend_proxy": "",
         }
 
     @staticmethod
@@ -3448,6 +3481,9 @@ class BrowserConfigHandler:
     @classmethod
     def _public_config(cls, cfg: dict) -> dict:
         public = json.loads(json.dumps(cfg))
+        backend_proxy = public.pop("backend_proxy", "") or ""
+        public["backend_proxy_masked"] = mask_proxy_url(backend_proxy)
+        public["backend_proxy_configured"] = bool(backend_proxy)
         camofox_cfg = public.get("camofox")
         if isinstance(camofox_cfg, dict):
             access_key = camofox_cfg.pop("access_key", "") or ""
@@ -3458,7 +3494,7 @@ class BrowserConfigHandler:
         return public
 
     @staticmethod
-    def _camofox_health(camofox_cfg: dict) -> dict:
+    def _camofox_health(camofox_cfg: dict, backend_proxy: str = "") -> dict:
         try:
             import requests
             base_url = (camofox_cfg.get("base_url") or "http://127.0.0.1:9377").rstrip("/")
@@ -3466,7 +3502,12 @@ class BrowserConfigHandler:
             access_key = (camofox_cfg.get("access_key") or "").strip()
             if access_key:
                 headers["Authorization"] = f"Bearer {access_key}"
-            resp = requests.get(f"{base_url}/health", headers=headers, timeout=5)
+            resp = requests.get(
+                f"{base_url}/health",
+                headers=headers,
+                timeout=5,
+                proxies=proxy_dict(backend_proxy),
+            )
             if resp.status_code >= 400:
                 return {"ok": False, "status_code": resp.status_code, "error": resp.text[:300]}
             data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
@@ -3511,7 +3552,7 @@ class BrowserConfigHandler:
             public_cfg = self._public_config(cfg)
             engine = cfg.get("engine", "playwright")
             camofox_health = (
-                self._camofox_health(camofox_cfg)
+                self._camofox_health(camofox_cfg, cfg.get("backend_proxy", ""))
                 if engine in ("camofox", "auto")
                 else {"ok": None, "engine": "playwright"}
             )
@@ -3541,7 +3582,7 @@ class BrowserConfigHandler:
                 if engine == "playwright":
                     ok = self._playwright_available()
                     return json.dumps({"status": "success", "health": {"ok": ok, "engine": "playwright"}}, ensure_ascii=False)
-                health = self._camofox_health(cfg.get("camofox") or {})
+                health = self._camofox_health(cfg.get("camofox") or {}, cfg.get("backend_proxy", ""))
                 if engine == "auto" and not health.get("ok"):
                     health["fallback_playwright_available"] = self._playwright_available()
                 return json.dumps({"status": "success", "health": health}, ensure_ascii=False)
@@ -3566,6 +3607,10 @@ class BrowserConfigHandler:
             if engine not in ("playwright", "camofox", "auto"):
                 return json.dumps({"status": "error", "message": f"invalid engine: {engine}"})
             cfg["engine"] = engine
+            try:
+                cfg["backend_proxy"] = normalize_proxy_url(cfg.get("backend_proxy", ""))
+            except ValueError as proxy_err:
+                return json.dumps({"status": "error", "message": str(proxy_err)})
 
             file_cfg = self._read_file_config()
             tools = file_cfg.get("tools")
@@ -3609,6 +3654,7 @@ class VideoParseConfigHandler:
             "delete_remote_file": True,
             "prefer_json": True,
             "cookie_file": "",
+            "proxy": "",
         }
 
     @classmethod
@@ -3683,8 +3729,9 @@ class VideoParseConfigHandler:
             normalized[key] = max(0, cls._int_value(normalized.get(key), defaults[key]))
         for key in ("keep_temp", "delete_source_on_success", "delete_remote_file", "prefer_json"):
             normalized[key] = cls._bool_value(normalized.get(key))
-        for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir", "cookie_file"):
+        for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir", "cookie_file", "proxy"):
             normalized[key] = str(normalized.get(key) or "").strip()
+        normalized["proxy"] = normalize_proxy_url(normalized.get("proxy", ""))
         if not normalized["api_base"]:
             normalized["api_base"] = defaults["api_base"]
         if not normalized["upload_api_base"]:
@@ -3799,6 +3846,9 @@ class VideoParseConfigHandler:
         api_key = public.pop("api_key", "") or ""
         public["api_key_masked"] = cls._mask_key(api_key)
         public["api_key_configured"] = bool(api_key)
+        proxy = public.pop("proxy", "") or ""
+        public["proxy_masked"] = mask_proxy_url(proxy)
+        public["proxy_configured"] = bool(proxy)
         cookie_file = public.get("cookie_file", "") or ""
         public["cookie_file_configured"] = bool(cookie_file and os.path.isfile(os.path.expanduser(cookie_file)))
         public["cookie_file_name"] = os.path.basename(cookie_file) if cookie_file else ""

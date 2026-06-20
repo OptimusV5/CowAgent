@@ -8,6 +8,7 @@ import requests
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from voice import audio_convert
 from voice.voice import Voice
@@ -53,7 +54,12 @@ class ZhipuAIVoice(Voice):
                 data = {"model": model, "stream": "false"}
                 headers = {"Authorization": f"Bearer {api_key}"}
                 response = requests.post(
-                    url, headers=headers, files=files, data=data, timeout=REQUEST_TIMEOUT
+                    url,
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=REQUEST_TIMEOUT,
+                    proxies=config_proxy_dict("voice_to_text_proxy"),
                 )
 
             if response.status_code != 200:
@@ -100,7 +106,11 @@ class ZhipuAIVoice(Voice):
                 "Content-Type": "application/json",
             }
             response = requests.post(
-                url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+                url,
+                headers=headers,
+                json=payload,
+                timeout=REQUEST_TIMEOUT,
+                proxies=config_proxy_dict("proxy"),
             )
 
             if response.status_code != 200:

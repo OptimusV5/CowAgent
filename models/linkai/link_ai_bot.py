@@ -13,6 +13,7 @@ from models.session_manager import SessionManager
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf, pconf
 import threading
 from common import memory, utils
@@ -138,7 +139,7 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
             # do http request
             base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
             res = requests.post(url=base_url + "/v1/chat/completions", json=body, headers=headers,
-                                timeout=conf().get("request_timeout", 180))
+                                timeout=conf().get("request_timeout", 180), proxies=config_proxy_dict("proxy"))
             if res.status_code == 200:
                 # execute success
                 response = res.json()
@@ -277,7 +278,7 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
             # do http request
             base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
             res = requests.post(url=base_url + "/v1/chat/completions", json=body, headers=headers,
-                                timeout=conf().get("request_timeout", 180))
+                                timeout=conf().get("request_timeout", 180), proxies=config_proxy_dict("proxy"))
             if res.status_code == 200:
                 # execute success
                 response = res.json()
@@ -320,7 +321,13 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
         # do http request
         base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
         params = {"app_code": app_code}
-        res = requests.get(url=base_url + "/v1/app/info", params=params, headers=headers, timeout=(5, 10))
+        res = requests.get(
+            url=base_url + "/v1/app/info",
+            params=params,
+            headers=headers,
+            timeout=(5, 10),
+            proxies=config_proxy_dict("proxy"),
+        )
         if res.status_code == 200:
             return res.json()
         else:
@@ -341,7 +348,7 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
                 "img_proxy": conf().get("image_proxy")
             }
             url = conf().get("linkai_api_base", "https://api.link-ai.tech") + "/v1/images/generations"
-            res = requests.post(url, headers=headers, json=data, timeout=(5, 90))
+            res = requests.post(url, headers=headers, json=data, timeout=(5, 90), proxies=config_proxy_dict("proxy"))
             t2 = time.time()
             image_url = res.json()["data"][0]["url"]
             logger.info("[OPEN_AI] image_url={}".format(image_url))
@@ -444,7 +451,7 @@ def _download_file(url: str):
             os.makedirs(file_path)
         file_name = url.split("/")[-1]  # 获取文件名
         file_path = os.path.join(file_path, file_name)
-        response = requests.get(url)
+        response = requests.get(url, proxies=config_proxy_dict("proxy"))
         with open(file_path, "wb") as f:
             f.write(response.content)
         return file_path
@@ -597,7 +604,8 @@ def _handle_linkai_sync_response(self, base_url, headers, body):
             url=base_url + "/v1/chat/completions",
             json=body,
             headers=headers,
-            timeout=conf().get("request_timeout", 180)
+            timeout=conf().get("request_timeout", 180),
+            proxies=config_proxy_dict("proxy"),
         )
         
         if res.status_code == 200:
@@ -624,7 +632,8 @@ def _handle_linkai_stream_response(self, base_url, headers, body):
             json=body,
             headers=headers,
             timeout=conf().get("request_timeout", 180),
-            stream=True
+            stream=True,
+            proxies=config_proxy_dict("proxy"),
         )
         
         if res.status_code != 200:

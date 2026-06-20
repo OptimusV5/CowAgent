@@ -54,6 +54,7 @@ const I18N = {
         models_asr_instance_hint: '填写后语音识别会优先使用这里的地址和 Key；留空则回退到全局 OpenAI 配置。',
         models_asr_api_base: 'ASR API Base',
         models_asr_api_key: 'ASR API Key',
+        models_asr_proxy: '语音识别代理',
         models_capability_tts: '语音合成',
         models_capability_tts_desc: '文字转语音',
         models_capability_embedding: '向量',
@@ -137,10 +138,13 @@ const I18N = {
         config_browser_stop: '停止',
         config_browser_ok: '连接正常',
         config_browser_failed: '连接失败',
+        config_browser_backend_proxy: '浏览器后端代理',
+        config_browser_backend_proxy_hint: '用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。',
         config_video_parse: '视频解析工具',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
         config_video_upload_api_base: 'Upload API Base',
+        config_video_proxy: '代理',
         config_video_model: '模型',
         config_video_cookies: 'yt-dlp Cookies',
         config_video_cookies_hint: '粘贴 Netscape HTTP Cookie File 格式内容，保存后用于 yt-dlp --cookies。',
@@ -168,6 +172,7 @@ const I18N = {
         config_video_key_missing: '未配置 Key',
         config_language: '语言', config_language_hint: '界面展示、命令文案、系统提示词等使用的语言（与右上角切换同步）',
         config_model_advanced: '高级配置',
+        config_model_proxy: '模型 API 代理',
         config_channel: '通道配置',
         config_agent_enabled: 'Agent 模式',
         config_max_tokens: '最大上下文 Token', config_max_tokens_hint: '对话中 Agent 能输入的最大 Token 长度，超过后会智能压缩处理',
@@ -311,6 +316,7 @@ const I18N = {
         models_asr_instance_hint: 'When set, speech recognition uses this base URL and key first; blank values fall back to global OpenAI config.',
         models_asr_api_base: 'ASR API Base',
         models_asr_api_key: 'ASR API Key',
+        models_asr_proxy: 'ASR Proxy',
         models_capability_tts: 'Speech Synthesis',
         models_capability_tts_desc: 'Text to voice',
         models_capability_embedding: 'Embedding',
@@ -394,10 +400,13 @@ const I18N = {
         config_browser_stop: 'Stop',
         config_browser_ok: 'Connection OK',
         config_browser_failed: 'Connection failed',
+        config_browser_backend_proxy: 'Browser Backend Proxy',
+        config_browser_backend_proxy_hint: 'Used only for CowAgent connecting to the Camofox REST API. It does not affect browser page traffic.',
         config_video_parse: 'Video Parse Tool',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
         config_video_upload_api_base: 'Upload API Base',
+        config_video_proxy: 'Proxy',
         config_video_model: 'Model',
         config_video_cookies: 'yt-dlp Cookies',
         config_video_cookies_hint: 'Paste Netscape HTTP Cookie File content. It will be used with yt-dlp --cookies after saving.',
@@ -425,6 +434,7 @@ const I18N = {
         config_video_key_missing: 'No key',
         config_language: 'Language', config_language_hint: 'Language for the UI, command text, system prompts and more (synced with the top-right switch)',
         config_model_advanced: 'Advanced',
+        config_model_proxy: 'Model API Proxy',
         config_channel: 'Channel Configuration',
         config_agent_enabled: 'Agent Mode',
         config_max_tokens: 'Max Context Tokens', config_max_tokens_hint: 'Max tokens the Agent can input per conversation, auto-compressed when exceeded',
@@ -4091,6 +4101,7 @@ let configProviders = {};
 let configApiBases = {};
 let configApiKeys = {};
 let configCurrentModel = '';
+let configModelProxyMasked = '';
 let cfgProviderValue = '';
 let cfgModelValue = '';
 let browserConfigState = null;
@@ -4184,6 +4195,7 @@ function initConfigView(data) {
     configApiBases = data.api_bases || {};
     configApiKeys = data.api_keys || {};
     configCurrentModel = data.model || '';
+    configModelProxyMasked = data.proxy || '';
 
     const providerEl = document.getElementById('cfg-provider');
     const providerOpts = Object.entries(configProviders).map(([pid, p]) => ({ value: pid, label: localizedLabel(p.label) }));
@@ -4198,6 +4210,7 @@ function initConfigView(data) {
 
     onProviderChange(cfgProviderValue);
     syncModelSelection(configCurrentModel);
+    initSecretInput(document.getElementById('cfg-model-proxy'), configModelProxyMasked || '');
 
     document.getElementById('cfg-max-tokens').value = data.agent_max_context_tokens || 50000;
     document.getElementById('cfg-max-turns').value = data.agent_max_context_turns || 20;
@@ -4420,6 +4433,10 @@ function saveModelConfig() {
             updates[p.api_key_field] = rawVal;
         }
     }
+    const proxyEl = document.getElementById('cfg-model-proxy');
+    if (proxyEl && proxyEl.dataset.masked !== '1') {
+        updates.proxy = proxyEl.value.trim();
+    }
 
     const btn = document.getElementById('cfg-model-save');
     btn.disabled = true;
@@ -4436,6 +4453,11 @@ function saveModelConfig() {
                 const keyInput = document.getElementById('cfg-api-key');
                 Object.entries(data.applied).forEach(([k, v]) => {
                     if (k === 'model') return;
+                    if (k === 'proxy') {
+                        configModelProxyMasked = v;
+                        initSecretInput(document.getElementById('cfg-model-proxy'), v || '');
+                        return;
+                    }
                     if (k.includes('api_key')) {
                         const masked = v.length > 8
                             ? v.substring(0, 4) + '*'.repeat(v.length - 8) + v.substring(v.length - 4)
@@ -4456,7 +4478,7 @@ function saveModelConfig() {
             }
             showStatus('cfg-model-status', 'config_saved', false);
         } else {
-            showStatus('cfg-model-status', 'config_save_error', true);
+            showStatusText('cfg-model-status', data.message || t('config_save_error'), true);
         }
     })
     .catch(() => showStatus('cfg-model-status', 'config_save_error', true))
@@ -4527,12 +4549,14 @@ function savePasswordConfig() {
 
 function initSecretInput(input, maskedValue) {
     if (!input) return;
+    const originalPlaceholder = input.dataset.placeholder || input.getAttribute('placeholder') || '';
+    input.dataset.placeholder = originalPlaceholder;
     const masked = maskedValue || '';
     input.value = masked;
     input.dataset.masked = masked ? '1' : '';
     input.dataset.maskedVal = masked;
     input.classList.toggle('cfg-key-masked', !!masked);
-    input.placeholder = masked ? '••••••••' : '';
+    input.placeholder = masked ? '••••••••' : originalPlaceholder;
 
     if (!input._cfgSecretBound) {
         input.addEventListener('focus', function() {
@@ -4609,6 +4633,7 @@ function initBrowserConfigView(data) {
     if (managedEl) managedEl.checked = camofox.managed === true;
     const autoStartEl = document.getElementById('cfg-camofox-auto-start');
     if (autoStartEl) autoStartEl.checked = camofox.auto_start === true;
+    initSecretInput(document.getElementById('cfg-browser-backend-proxy'), cfg.backend_proxy_masked || '');
 
     const cdpEl = document.getElementById('cfg-playwright-cdp');
     if (cdpEl) cdpEl.value = playwright.cdp_endpoint || '';
@@ -4631,6 +4656,10 @@ function collectBrowserConfigPayload() {
             auto_start: document.getElementById('cfg-camofox-auto-start')?.checked === true,
         },
     };
+    const backendProxyEl = document.getElementById('cfg-browser-backend-proxy');
+    if (backendProxyEl && backendProxyEl.dataset.masked !== '1') {
+        payload.backend_proxy = backendProxyEl.value.trim();
+    }
     const accessKeyEl = document.getElementById('cfg-camofox-access-key');
     if (accessKeyEl && accessKeyEl.dataset.masked !== '1') {
         payload.camofox.access_key = accessKeyEl.value.trim();
@@ -4664,7 +4693,7 @@ function saveBrowserConfig() {
             showStatus('cfg-browser-status', 'config_saved', false);
             loadBrowserConfig();
         } else {
-            showStatus('cfg-browser-status', 'config_save_error', true);
+            showStatusText('cfg-browser-status', data.message || t('config_save_error'), true);
         }
     })
     .catch(() => showStatus('cfg-browser-status', 'config_save_error', true))
@@ -4791,6 +4820,7 @@ function initVideoParseConfigView(data) {
     initSecretInput(document.getElementById('cfg-video-api-key'), cfg.api_key_masked || '');
     setValue('cfg-video-api-base', cfg.api_base || 'https://generativelanguage.googleapis.com');
     setValue('cfg-video-upload-api-base', cfg.upload_api_base || cfg.api_base || 'https://generativelanguage.googleapis.com');
+    initSecretInput(document.getElementById('cfg-video-proxy'), cfg.proxy_masked || '');
     setValue('cfg-video-model', cfg.model || 'gemini-2.5-flash');
     updateVideoCookieStatus(cfg);
     setValue('cfg-video-prompt', cfg.prompt || '');
@@ -4830,6 +4860,10 @@ function collectVideoParseConfigPayload() {
     const keyEl = document.getElementById('cfg-video-api-key');
     if (keyEl && keyEl.dataset.masked !== '1') {
         payload.api_key = keyEl.value.trim();
+    }
+    const proxyEl = document.getElementById('cfg-video-proxy');
+    if (proxyEl && proxyEl.dataset.masked !== '1') {
+        payload.proxy = proxyEl.value.trim();
     }
     const cookieContent = document.getElementById('cfg-video-cookie-content')?.value || '';
     if (cookieContent.trim()) {
@@ -5970,7 +6004,6 @@ function renderAsrProviderInstance(body, cap) {
     const apiBase = openai.api_base || '';
     const apiBaseDefault = openai.api_base_default || 'https://api.openai.com/v1';
     const apiBasePlaceholder = openai.api_base_placeholder || apiBaseDefault;
-
     const wrap = document.createElement('div');
     wrap.id = 'cap-asr-openai-instance';
     wrap.className = 'hidden pt-3 border-t border-slate-100 dark:border-white/10 space-y-3';
@@ -6011,6 +6044,7 @@ function renderAsrProviderInstance(body, cap) {
     } else {
         body.appendChild(wrap);
     }
+    renderAsrProxyConfig(body, cap, wrap.nextSibling);
 
     const keyInput = wrap.querySelector('#cap-asr-api-key');
     if (!keyInput) return;
@@ -6026,6 +6060,43 @@ function renderAsrProviderInstance(body, cap) {
         unmask();
     });
     keyInput.addEventListener('paste', unmask);
+
+}
+
+function renderAsrProxyConfig(body, cap, beforeNode) {
+    const proxyMasked = (cap && cap.proxy_masked) || '';
+    const hasProxy = !!proxyMasked;
+    const wrap = document.createElement('div');
+    wrap.id = 'cap-asr-proxy-wrap';
+    wrap.className = 'pt-3 border-t border-slate-100 dark:border-white/10';
+    wrap.innerHTML = `
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_proxy')}</label>
+        <input id="cap-asr-proxy" type="text" autocomplete="off" spellcheck="false"
+               class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                      focus:outline-none focus:border-primary-500 font-mono transition-colors ${hasProxy ? 'cfg-key-masked' : ''}"
+               value="${escapeHtml(proxyMasked)}"
+               data-masked="${hasProxy ? '1' : ''}"
+               data-had-proxy="${hasProxy ? '1' : ''}"
+               placeholder="socks5h://127.0.0.1:1080" />`;
+    const parent = beforeNode && beforeNode.parentNode ? beforeNode.parentNode : body;
+    parent.insertBefore(wrap, beforeNode || null);
+
+    const proxyInput = wrap.querySelector('#cap-asr-proxy');
+    if (proxyInput) {
+        const unmaskProxy = () => {
+            if (proxyInput.dataset.masked === '1') {
+                proxyInput.value = '';
+                proxyInput.dataset.masked = '';
+                proxyInput.classList.remove('cfg-key-masked');
+            }
+        };
+        proxyInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab' || e.key === 'Escape') return;
+            unmaskProxy();
+        });
+        proxyInput.addEventListener('paste', unmaskProxy);
+    }
 }
 
 function updateAsrProviderInstanceVisibility(providerId, scope) {
@@ -6475,20 +6546,23 @@ function getCapabilityModelValue(def) {
 }
 
 function getAsrProviderInstancePayload(provider) {
-    if (provider !== 'openai') return {};
     const payload = {};
     const baseInput = document.getElementById('cap-asr-api-base');
     const keyInput = document.getElementById('cap-asr-api-key');
-    if (baseInput) {
+    const proxyInput = document.getElementById('cap-asr-proxy');
+    if (provider === 'openai' && baseInput) {
         payload.asr_api_base = baseInput.value.trim();
     }
-    if (keyInput && keyInput.dataset.masked !== '1') {
+    if (provider === 'openai' && keyInput && keyInput.dataset.masked !== '1') {
         const value = keyInput.value.trim();
         if (value) {
             payload.asr_api_key = value;
         } else if (keyInput.dataset.hadKey === '1') {
             payload.asr_api_key_clear = true;
         }
+    }
+    if (proxyInput && proxyInput.dataset.masked !== '1') {
+        payload.asr_proxy = proxyInput.value.trim();
     }
     return payload;
 }
@@ -6569,6 +6643,7 @@ function _persistCapability(capId, provider, model, onAfterSuccess, extras) {
     if (extras && extras.asr_api_base !== undefined) payload.asr_api_base = extras.asr_api_base;
     if (extras && extras.asr_api_key !== undefined) payload.asr_api_key = extras.asr_api_key;
     if (extras && extras.asr_api_key_clear !== undefined) payload.asr_api_key_clear = extras.asr_api_key_clear;
+    if (extras && extras.asr_proxy !== undefined) payload.asr_proxy = extras.asr_proxy;
     fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6582,7 +6657,7 @@ function _persistCapability(capId, provider, model, onAfterSuccess, extras) {
                 if (onAfterSuccess) onAfterSuccess();
             }, 400);
         } else {
-            showStatus(`cap-${capId}-status`, 'models_save_failed', true);
+            showStatusText(`cap-${capId}-status`, data.message || t('models_save_failed'), true);
         }
     }).catch(() => showStatus(`cap-${capId}-status`, 'models_save_failed', true));
 }

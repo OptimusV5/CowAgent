@@ -18,6 +18,7 @@ import requests
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from voice.voice import Voice
 
@@ -63,7 +64,13 @@ class MimoVoice(Voice):
                 "Content-Type": "application/json",
             }
             url = f"{api_base}/chat/completions"
-            response = requests.post(url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=REQUEST_TIMEOUT,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 logger.error(

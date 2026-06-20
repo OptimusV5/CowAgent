@@ -15,6 +15,7 @@ from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common import const
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 
 # Optional OpenAI image support
@@ -46,6 +47,10 @@ class ClaudeAPIBot(Bot, OpenAIImage):
     @property
     def proxy(self):
         return conf().get("proxy", None)
+
+    @property
+    def proxies(self):
+        return config_proxy_dict("proxy")
 
     def reply(self, query, context=None):
         # acquire reply content
@@ -123,12 +128,11 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                 data["tools"] = tools
 
             # Make HTTP request
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
             response = requests.post(
                 f"{self.api_base}/messages",
                 headers=headers,
                 json=data,
-                proxies=proxies
+                proxies=self.proxies,
             )
 
             if response.status_code != 200:
@@ -276,9 +280,8 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             }
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
             resp = requests.post(f"{self.api_base}/messages",
-                                 headers=headers, json=data, proxies=proxies)
+                                 headers=headers, json=data, proxies=self.proxies)
 
             if resp.status_code != 200:
                 return {"error": True, "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}
@@ -397,12 +400,11 @@ class ClaudeAPIBot(Bot, OpenAIImage):
         }
 
         # Make HTTP request
-        proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
         response = requests.post(
             f"{self.api_base}/messages",
             headers=headers,
             json=request_params,
-            proxies=proxies
+            proxies=self.proxies,
         )
 
         if response.status_code != 200:
@@ -478,12 +480,11 @@ class ClaudeAPIBot(Bot, OpenAIImage):
 
         try:
             # Make streaming HTTP request
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
             response = requests.post(
                 f"{self.api_base}/messages",
                 headers=headers,
                 json=request_params,
-                proxies=proxies,
+                proxies=self.proxies,
                 stream=True
             )
 

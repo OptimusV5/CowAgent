@@ -4,6 +4,7 @@ import requests
 
 from models.bot import Bot
 from bridge.reply import Reply, ReplyType
+from common.proxy import config_proxy_dict
 
 
 # Baidu Unit对话接口 (可用, 但能力较弱)
@@ -18,7 +19,7 @@ class BaiduUnitBot(Bot):
         )
         print(post_data)
         headers = {"content-type": "application/x-www-form-urlencoded"}
-        response = requests.post(url, data=post_data.encode(), headers=headers)
+        response = requests.post(url, data=post_data.encode(), headers=headers, proxies=config_proxy_dict("proxy"))
         if response:
             reply = Reply(
                 ReplyType.TEXT,
@@ -30,7 +31,7 @@ class BaiduUnitBot(Bot):
         access_key = "YOUR_ACCESS_KEY"
         secret_key = "YOUR_SECRET_KEY"
         host = "https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=" + access_key + "&client_secret=" + secret_key
-        response = requests.get(host)
+        response = requests.get(host, proxies=config_proxy_dict("proxy"))
         if response:
             print(response.json())
             return response.json()["access_token"]

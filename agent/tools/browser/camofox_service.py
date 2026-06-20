@@ -12,6 +12,7 @@ from urllib.parse import quote
 import requests
 
 from common.log import logger
+from common.proxy import proxy_dict
 from common.utils import expand_path
 
 
@@ -34,6 +35,7 @@ class CamofoxBrowserService:
         self._admin_key = str(self._cfg.get("admin_key") or os.environ.get("CAMOFOX_ADMIN_KEY") or "").strip()
         self._user_id = str(self._cfg.get("user_id") or _DEFAULT_USER_ID)
         self._session_key = str(self._cfg.get("session_key") or _DEFAULT_SESSION_KEY)
+        self._backend_proxy = str(self._cfg.get("backend_proxy") or "").strip()
         self._timeout = float(self._cfg.get("request_timeout") or 30)
         self._auto_start = bool(self._cfg.get("auto_start", False))
         self._managed = bool(self._cfg.get("managed", False))
@@ -67,6 +69,7 @@ class CamofoxBrowserService:
                 self._url(path),
                 headers=merged_headers,
                 timeout=self._timeout,
+                proxies=proxy_dict(self._backend_proxy),
                 **kwargs,
             )
         except Exception as e:
@@ -83,7 +86,12 @@ class CamofoxBrowserService:
 
     def health(self) -> Dict[str, Any]:
         try:
-            resp = requests.get(self._url("/health"), timeout=5, headers=self._headers())
+            resp = requests.get(
+                self._url("/health"),
+                timeout=5,
+                headers=self._headers(),
+                proxies=proxy_dict(self._backend_proxy),
+            )
             if resp.status_code >= 400:
                 return {"ok": False, "status": resp.status_code, "error": resp.text[:300]}
             data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
@@ -176,6 +184,7 @@ class CamofoxBrowserService:
                     headers={"Content-Type": "application/json", "x-admin-key": self._admin_key},
                     data="{}",
                     timeout=5,
+                    proxies=proxy_dict(self._backend_proxy),
                 )
                 if resp.status_code >= 400:
                     return {"ok": False, "status": resp.status_code, "error": resp.text[:300]}

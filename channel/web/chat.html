@@ -558,6 +558,14 @@
                                                           focus:outline-none focus:border-primary-500 font-mono transition-colors"
                                                    placeholder="https://...">
                                         </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_model_proxy">模型 API 代理</label>
+                                            <input id="cfg-model-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                   class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                          bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                          focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                   placeholder="socks5h://127.0.0.1:1080">
+                                        </div>
                                         <!-- Save Model Button -->
                                         <div class="flex items-center justify-end gap-3 pt-1">
                                             <span id="cfg-model-status" class="text-xs text-primary-500 opacity-0 transition-opacity duration-300"></span>
@@ -715,6 +723,15 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_browser_backend_proxy">浏览器后端代理</label>
+                                            <input id="cfg-browser-backend-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                   class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                          bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                          focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                   placeholder="socks5h://127.0.0.1:1080">
+                                            <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_backend_proxy_hint">用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。</p>
+                                        </div>
                                         <div id="cfg-browser-playwright" class="space-y-4">
                                             <div>
                                                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">CDP Endpoint</label>
@@ -846,6 +863,14 @@
                                                                   bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
                                                                   focus:outline-none focus:border-primary-500 font-mono transition-colors"
                                                            placeholder="https://generativelanguage.googleapis.com">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_proxy">代理</label>
+                                                    <input id="cfg-video-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                           class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                  focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                           placeholder="socks5h://127.0.0.1:1080">
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_prompt">Prompt</label>

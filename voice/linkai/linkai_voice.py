@@ -9,6 +9,7 @@ import requests
 from bridge.reply import Reply, ReplyType
 from common import const
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from voice import audio_convert
 from voice.voice import Voice
@@ -39,6 +40,7 @@ class LinkAIVoice(Voice):
                     headers=headers,
                     data={"model": model},
                     timeout=(5, 60),
+                    proxies=config_proxy_dict("voice_to_text_proxy"),
                 )
             if res.status_code != 200:
                 msg = ""
@@ -69,7 +71,7 @@ class LinkAIVoice(Voice):
             model = conf().get("text_to_voice_model")
             if model:
                 data["model"] = model
-            res = requests.post(url, headers=headers, json=data, timeout=(5, 120))
+            res = requests.post(url, headers=headers, json=data, timeout=(5, 120), proxies=config_proxy_dict("proxy"))
             if res.status_code != 200:
                 msg = ""
                 try:

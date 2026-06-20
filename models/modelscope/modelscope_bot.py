@@ -9,6 +9,7 @@ from models.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf, load_config
 from .modelscope_session import ModelScopeSession
 
@@ -122,7 +123,8 @@ class ModelScopeBot(Bot):
                 "{}/chat/completions".format(self.base_url),
                 headers=headers,
                 json=body,
-                timeout=120
+                timeout=120,
+                proxies=config_proxy_dict("proxy"),
             )
             
             if res.status_code == 200:
@@ -187,7 +189,8 @@ class ModelScopeBot(Bot):
                 headers=headers,
                 json=body,
                 stream=True,
-                timeout=120
+                timeout=120,
+                proxies=config_proxy_dict("proxy"),
             )
             if res.status_code == 200:
                 content = ""
@@ -261,7 +264,8 @@ class ModelScopeBot(Bot):
                 "{}/images/generations".format(self.base_url),
                 headers=create_headers,
                 data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
-                timeout=120
+                timeout=120,
+                proxies=config_proxy_dict("proxy"),
             )
             
             logger.debug("[ModelScopeImage] create task status={}".format(res.status_code))
@@ -298,7 +302,8 @@ class ModelScopeBot(Bot):
                 task_res = requests.get(
                     poll_url,
                     headers=poll_headers,
-                    timeout=30
+                    timeout=30,
+                    proxies=config_proxy_dict("proxy"),
                 )
                 
                 logger.debug("[ModelScopeImage] poll {} status={}".format(i+1, task_res.status_code))
@@ -538,7 +543,8 @@ class ModelScopeBot(Bot):
                 headers=headers,
                 json=body,
                 stream=True,
-                timeout=120
+                timeout=120,
+                proxies=config_proxy_dict("proxy"),
             )
             
             if response.status_code != 200:

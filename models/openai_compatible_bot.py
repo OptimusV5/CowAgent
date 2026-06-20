@@ -11,6 +11,7 @@ import json
 import requests
 from typing import Optional
 from common.log import logger
+from common.proxy import config_proxy_dict
 from agent.protocol.message_utils import drop_orphaned_tool_results_openai
 from models.openai.openai_http_client import OpenAIHTTPClient, OpenAIHTTPError
 
@@ -415,7 +416,10 @@ class OpenAICompatibleBot:
             }
             resp = requests.post(
                 f"{api_base}/chat/completions",
-                headers=headers, json=payload, timeout=180,
+                headers=headers,
+                json=payload,
+                timeout=180,
+                proxies=config_proxy_dict("proxy"),
             )
             if resp.status_code != 200:
                 body = resp.text[:500]

@@ -20,6 +20,7 @@ from models.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf
 from models.chatgpt.chat_gpt_session import ChatGPTSession
 from models.baidu.baidu_wenxin_session import BaiduWenxinSession
@@ -212,7 +213,7 @@ class GoogleGeminiBot(Bot):
 
         if image_url.startswith("http://") or image_url.startswith("https://"):
             try:
-                response = requests.get(image_url, timeout=20)
+                response = requests.get(image_url, timeout=20, proxies=config_proxy_dict("proxy"))
                 if response.status_code != 200:
                     logger.warning(f"[Gemini] Failed to fetch remote image: status={response.status_code}, url={image_url}")
                     return None
@@ -257,7 +258,13 @@ class GoogleGeminiBot(Bot):
             }
             endpoint = f"{self.api_base}/v1beta/models/{model_name}:generateContent"
             headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-            resp = requests.post(endpoint, headers=headers, json=payload, timeout=180)
+            resp = requests.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=180,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if resp.status_code != 200:
                 return {"error": True, "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}
@@ -501,7 +508,8 @@ class GoogleGeminiBot(Bot):
                 headers=headers,
                 json=payload,
                 stream=stream,
-                timeout=60
+                timeout=60,
+                proxies=config_proxy_dict("proxy"),
             )
             
             # Check HTTP status for stream mode (for non-stream, it's checked in handler)

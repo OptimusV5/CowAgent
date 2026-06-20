@@ -14,6 +14,7 @@ import requests
 from agent.tools.base_tool import BaseTool, ToolResult
 from agent.tools.utils.truncate import format_size
 from common.log import logger
+from common.proxy import normalize_proxy_url, proxy_dict
 from common.utils import expand_path
 from config import conf
 
@@ -145,6 +146,7 @@ class VideoParseTool(BaseTool):
                     work_dir,
                     runtime["download_timeout"],
                     runtime["cookie_file"],
+                    runtime.get("proxy", ""),
                 )
             else:
                 local_source_path = self._resolve_local_path(file_path)
@@ -261,6 +263,7 @@ class VideoParseTool(BaseTool):
             "delete_remote_file": self._bool_value(cfg.get("delete_remote_file", True)),
             "prefer_json": self._bool_value(cfg.get("prefer_json", True)),
             "cookie_file": str(cfg.get("cookie_file") or "").strip(),
+            "proxy": str(cfg.get("proxy") or "").strip(),
         }
 
     def _latest_tool_config(self) -> Dict[str, Any]:
@@ -307,6 +310,8 @@ class VideoParseTool(BaseTool):
                 "Missing GEMINI_API_KEY. Configure it with env_config(action='set', key='GEMINI_API_KEY', value='...') "
                 "or config.json gemini_api_key."
             )
+        if runtime.get("proxy"):
+            normalize_proxy_url(runtime["proxy"])
 
     def _validate_commands(self, url_required: bool) -> None:
         if url_required and not shutil.which("yt-dlp"):
@@ -328,7 +333,14 @@ class VideoParseTool(BaseTool):
         os.makedirs(work_dir, exist_ok=True)
         return work_dir
 
-    def _download_video(self, url: str, work_dir: str, timeout: int, cookie_file: str = "") -> List[str]:
+    def _download_video(
+        self,
+        url: str,
+        work_dir: str,
+        timeout: int,
+        cookie_file: str = "",
+        proxy: str = "",
+    ) -> List[str]:
         cmd = [
             "yt-dlp",
             "--no-playlist",
@@ -344,6 +356,9 @@ class VideoParseTool(BaseTool):
             if not os.path.isfile(cookie_file):
                 raise VideoParseError(f"Configured yt-dlp cookie file not found: {cookie_file}")
             cmd.extend(["--cookies", cookie_file])
+        proxy = str(proxy or "").strip()
+        if proxy:
+            cmd.extend(["--proxy", normalize_proxy_url(proxy)])
         cmd.append(url)
         logger.info(f"[VideoParse] Downloading video: {url} -> {work_dir}")
         try:
@@ -597,6 +612,7 @@ class VideoParseTool(BaseTool):
             headers=headers,
             json={"file": {"display_name": display_name}},
             timeout=runtime["gemini_timeout"],
+            proxies=proxy_dict(runtime.get("proxy") or ""),
         )
         self._raise_for_gemini_error(response, "create upload session")
 
@@ -615,6 +631,7 @@ class VideoParseTool(BaseTool):
                 headers=upload_headers,
                 data=f,
                 timeout=runtime["gemini_timeout"],
+                proxies=proxy_dict(runtime.get("proxy") or ""),
             )
         self._raise_for_gemini_error(upload_response, "upload video")
         return upload_response.json()
@@ -655,6 +672,7 @@ class VideoParseTool(BaseTool):
             url,
             headers={"x-goog-api-key": runtime["api_key"]},
             timeout=runtime["gemini_timeout"],
+            proxies=proxy_dict(runtime.get("proxy") or ""),
         )
         self._raise_for_gemini_error(response, "get uploaded file")
         return response.json()
@@ -718,6 +736,7 @@ class VideoParseTool(BaseTool):
             },
             json=payload,
             timeout=runtime["gemini_timeout"],
+            proxies=proxy_dict(runtime.get("proxy") or ""),
         )
         self._raise_for_gemini_error(response, "generate content")
         return response.json()
@@ -792,6 +811,7 @@ class VideoParseTool(BaseTool):
                 url,
                 headers={"x-goog-api-key": runtime["api_key"]},
                 timeout=min(runtime["gemini_timeout"], 60),
+                proxies=proxy_dict(runtime.get("proxy") or ""),
             )
             if response.status_code >= 400:
                 logger.warning(

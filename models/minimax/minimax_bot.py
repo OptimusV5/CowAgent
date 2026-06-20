@@ -12,6 +12,7 @@ from models.session_manager import SessionManager
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.proxy import config_proxy_dict
 from config import conf, load_config
 from common import const
 from agent.protocol.message_utils import drop_orphaned_tool_results_openai
@@ -115,7 +116,13 @@ class MinimaxBot(Bot):
             url = f"{self.api_base}/chat/completions"
             logger.debug(f"[MINIMAX] Calling {url} with model={request_body['model']}")
 
-            response = requests.post(url, headers=headers, json=request_body, timeout=60)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=60,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code == 200:
                 result = response.json()
@@ -201,7 +208,8 @@ class MinimaxBot(Bot):
                 "Content-Type": "application/json",
             }
             resp = requests.post(f"{self.api_base}/chat/completions",
-                                 headers=headers, json=payload, timeout=180)
+                                 headers=headers, json=payload, timeout=180,
+                                 proxies=config_proxy_dict("proxy"))
             if resp.status_code != 200:
                 return {"error": True, "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}
             data = resp.json()
@@ -451,7 +459,13 @@ class MinimaxBot(Bot):
             request_body.pop("stream", None)
 
             url = f"{self.api_base}/chat/completions"
-            response = requests.post(url, headers=headers, json=request_body, timeout=60)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=60,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 error_msg = response.text
@@ -527,7 +541,14 @@ class MinimaxBot(Bot):
             }
 
             url = f"{self.api_base}/chat/completions"
-            response = requests.post(url, headers=headers, json=request_body, stream=True, timeout=60)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=request_body,
+                stream=True,
+                timeout=60,
+                proxies=config_proxy_dict("proxy"),
+            )
 
             if response.status_code != 200:
                 error_msg = response.text
