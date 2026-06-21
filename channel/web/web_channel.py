@@ -25,6 +25,11 @@ from common import i18n
 from common.log import logger
 from common.proxy import mask_proxy_url, normalize_proxy_url, proxy_dict
 from common.singleton import singleton
+from common.video_parse_utils import (
+    normalize_yt_dlp_proxy_sites,
+    resolve_yt_dlp_command,
+    yt_dlp_proxy_site_options,
+)
 from config import conf
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
@@ -3655,6 +3660,7 @@ class VideoParseConfigHandler:
             "prefer_json": True,
             "cookie_file": "",
             "proxy": "",
+            "yt_dlp_proxy_sites": [],
         }
 
     @classmethod
@@ -3732,6 +3738,7 @@ class VideoParseConfigHandler:
         for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir", "cookie_file", "proxy"):
             normalized[key] = str(normalized.get(key) or "").strip()
         normalized["proxy"] = normalize_proxy_url(normalized.get("proxy", ""))
+        normalized["yt_dlp_proxy_sites"] = normalize_yt_dlp_proxy_sites(normalized.get("yt_dlp_proxy_sites"))
         if not normalized["api_base"]:
             normalized["api_base"] = defaults["api_base"]
         if not normalized["upload_api_base"]:
@@ -3830,8 +3837,10 @@ class VideoParseConfigHandler:
     def _health(cls, cfg: dict) -> dict:
         key, source = cls._resolved_key(cfg)
         cookie_file = str(cfg.get("cookie_file") or "").strip()
+        yt_dlp_cmd, yt_dlp_path = resolve_yt_dlp_command()
         return {
-            "yt_dlp": bool(shutil.which("yt-dlp")),
+            "yt_dlp": bool(yt_dlp_cmd),
+            "yt_dlp_path": yt_dlp_path,
             "ffmpeg": bool(shutil.which("ffmpeg")),
             "ffprobe": bool(shutil.which("ffprobe")),
             "gemini_key": bool(key),
@@ -3849,6 +3858,8 @@ class VideoParseConfigHandler:
         proxy = public.pop("proxy", "") or ""
         public["proxy_masked"] = mask_proxy_url(proxy)
         public["proxy_configured"] = bool(proxy)
+        public["yt_dlp_proxy_site_options"] = yt_dlp_proxy_site_options()
+        public["yt_dlp_proxy_sites"] = normalize_yt_dlp_proxy_sites(public.get("yt_dlp_proxy_sites"))
         cookie_file = public.get("cookie_file", "") or ""
         public["cookie_file_configured"] = bool(cookie_file and os.path.isfile(os.path.expanduser(cookie_file)))
         public["cookie_file_name"] = os.path.basename(cookie_file) if cookie_file else ""

@@ -16,6 +16,11 @@ from agent.tools.utils.truncate import format_size
 from common.log import logger
 from common.proxy import normalize_proxy_url, proxy_dict
 from common.utils import expand_path
+from common.video_parse_utils import (
+    normalize_yt_dlp_proxy_sites,
+    resolve_yt_dlp_command,
+    should_proxy_yt_dlp_url,
+)
 from config import conf
 
 
@@ -141,12 +146,13 @@ class VideoParseTool(BaseTool):
 
             if url:
                 self.report_progress("正在下载视频...")
+                yt_dlp_proxy = runtime["proxy"] if should_proxy_yt_dlp_url(url, runtime.get("yt_dlp_proxy_sites")) else ""
                 media_paths = self._download_video(
                     url,
                     work_dir,
                     runtime["download_timeout"],
                     runtime["cookie_file"],
-                    runtime.get("proxy", ""),
+                    yt_dlp_proxy,
                 )
             else:
                 local_source_path = self._resolve_local_path(file_path)
@@ -264,6 +270,7 @@ class VideoParseTool(BaseTool):
             "prefer_json": self._bool_value(cfg.get("prefer_json", True)),
             "cookie_file": str(cfg.get("cookie_file") or "").strip(),
             "proxy": str(cfg.get("proxy") or "").strip(),
+            "yt_dlp_proxy_sites": normalize_yt_dlp_proxy_sites(cfg.get("yt_dlp_proxy_sites")),
         }
 
     def _latest_tool_config(self) -> Dict[str, Any]:
@@ -314,7 +321,8 @@ class VideoParseTool(BaseTool):
             normalize_proxy_url(runtime["proxy"])
 
     def _validate_commands(self, url_required: bool) -> None:
-        if url_required and not shutil.which("yt-dlp"):
+        yt_dlp_cmd, _ = resolve_yt_dlp_command()
+        if url_required and not yt_dlp_cmd:
             raise VideoParseError(
                 "Missing dependency: yt-dlp. Install it with: python3 -m pip install -U yt-dlp"
             )
@@ -341,8 +349,10 @@ class VideoParseTool(BaseTool):
         cookie_file: str = "",
         proxy: str = "",
     ) -> List[str]:
-        cmd = [
-            "yt-dlp",
+        yt_dlp_cmd, yt_dlp_display = resolve_yt_dlp_command()
+        if not yt_dlp_cmd:
+            raise VideoParseError("Missing dependency: yt-dlp. Install it with: python3 -m pip install -U yt-dlp")
+        cmd = yt_dlp_cmd + [
             "--no-playlist",
             "--no-progress",
             "-f",
@@ -360,7 +370,8 @@ class VideoParseTool(BaseTool):
         if proxy:
             cmd.extend(["--proxy", normalize_proxy_url(proxy)])
         cmd.append(url)
-        logger.info(f"[VideoParse] Downloading video: {url} -> {work_dir}")
+        proxy_note = " with proxy" if proxy else ""
+        logger.info(f"[VideoParse] Downloading video{proxy_note}: {url} -> {work_dir} using {yt_dlp_display}")
         try:
             completed = subprocess.run(
                 cmd,

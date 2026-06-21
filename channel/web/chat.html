@@ -871,6 +871,32 @@
                                                                   bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
                                                                   focus:outline-none focus:border-primary-500 font-mono transition-colors"
                                                            placeholder="socks5h://127.0.0.1:1080">
+                                                    <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_video_proxy_hint">Gemini API 会使用该代理；yt-dlp 默认不使用代理，只对下方选中的站点使用。</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_yt_dlp_proxy_sites">yt-dlp 使用代理的站点</label>
+                                                    <div id="cfg-video-yt-proxy-sites-picker" class="relative">
+                                                        <button id="cfg-video-yt-proxy-sites-trigger" type="button"
+                                                                class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                       bg-slate-50 dark:bg-white/5 text-sm text-slate-700 dark:text-slate-200
+                                                                       focus:outline-none focus:border-primary-500 transition-colors flex items-center justify-between gap-3">
+                                                            <span id="cfg-video-yt-proxy-sites-summary" class="truncate" data-i18n="config_video_yt_dlp_proxy_sites_none">未选择站点</span>
+                                                            <i class="fas fa-chevron-down text-xs text-slate-400"></i>
+                                                        </button>
+                                                        <div id="cfg-video-yt-proxy-sites-panel"
+                                                             class="hidden mt-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/95 overflow-hidden">
+                                                            <div class="p-2 border-b border-slate-100 dark:border-white/10">
+                                                                <input id="cfg-video-yt-proxy-site-search" type="text" autocomplete="off" spellcheck="false"
+                                                                       class="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600
+                                                                              bg-white dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                              focus:outline-none focus:border-primary-500 transition-colors"
+                                                                       data-i18n-placeholder="config_video_yt_dlp_proxy_sites_search">
+                                                            </div>
+                                                            <div id="cfg-video-yt-proxy-sites"
+                                                                 class="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-white/10"></div>
+                                                        </div>
+                                                    </div>
+                                                    <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_video_yt_dlp_proxy_sites_hint">未选择站点时，yt-dlp 永远不使用代理。</p>
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_prompt">Prompt</label>

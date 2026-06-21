@@ -145,6 +145,12 @@ const I18N = {
         config_video_api_base: 'Gemini API Base',
         config_video_upload_api_base: 'Upload API Base',
         config_video_proxy: '代理',
+        config_video_proxy_hint: 'Gemini API 会使用该代理；yt-dlp 默认不使用代理，只对下方选中的站点使用。',
+        config_video_yt_dlp_proxy_sites: 'yt-dlp 使用代理的站点',
+        config_video_yt_dlp_proxy_sites_search: '搜索站点...',
+        config_video_yt_dlp_proxy_sites_hint: '未选择站点时，yt-dlp 永远不使用代理。',
+        config_video_yt_dlp_proxy_sites_empty: '没有匹配的站点',
+        config_video_yt_dlp_proxy_sites_none: '未选择站点',
         config_video_model: '模型',
         config_video_cookies: 'yt-dlp Cookies',
         config_video_cookies_hint: '粘贴 Netscape HTTP Cookie File 格式内容，保存后用于 yt-dlp --cookies。',
@@ -407,6 +413,12 @@ const I18N = {
         config_video_api_base: 'Gemini API Base',
         config_video_upload_api_base: 'Upload API Base',
         config_video_proxy: 'Proxy',
+        config_video_proxy_hint: 'Gemini API uses this proxy. yt-dlp does not use it by default and only uses it for selected sites below.',
+        config_video_yt_dlp_proxy_sites: 'yt-dlp proxy sites',
+        config_video_yt_dlp_proxy_sites_search: 'Search sites...',
+        config_video_yt_dlp_proxy_sites_hint: 'When no site is selected, yt-dlp never uses the proxy.',
+        config_video_yt_dlp_proxy_sites_empty: 'No matching sites',
+        config_video_yt_dlp_proxy_sites_none: 'No sites selected',
         config_video_model: 'Model',
         config_video_cookies: 'yt-dlp Cookies',
         config_video_cookies_hint: 'Paste Netscape HTTP Cookie File content. It will be used with yt-dlp --cookies after saving.',
@@ -4806,6 +4818,96 @@ function onVideoCookieFileSelected(input) {
     reader.readAsText(file);
 }
 
+function renderVideoYtDlpProxySites(cfg) {
+    const host = document.getElementById('cfg-video-yt-proxy-sites');
+    const searchEl = document.getElementById('cfg-video-yt-proxy-site-search');
+    const pickerEl = document.getElementById('cfg-video-yt-proxy-sites-picker');
+    const triggerEl = document.getElementById('cfg-video-yt-proxy-sites-trigger');
+    const panelEl = document.getElementById('cfg-video-yt-proxy-sites-panel');
+    const summaryEl = document.getElementById('cfg-video-yt-proxy-sites-summary');
+    if (!host) return;
+    const options = Array.isArray(cfg.yt_dlp_proxy_site_options) ? cfg.yt_dlp_proxy_site_options : [];
+    const selected = new Set(Array.isArray(cfg.yt_dlp_proxy_sites) ? cfg.yt_dlp_proxy_sites : []);
+
+    const updateSummary = () => {
+        if (!summaryEl) return;
+        const selectedOptions = options.filter(opt => selected.has(opt.id));
+        summaryEl.textContent = selectedOptions.length
+            ? selectedOptions.map(opt => opt.label || opt.id).join(', ')
+            : t('config_video_yt_dlp_proxy_sites_none');
+        summaryEl.classList.toggle('text-slate-400', selectedOptions.length === 0);
+        summaryEl.classList.toggle('dark:text-slate-500', selectedOptions.length === 0);
+    };
+
+    const render = () => {
+        const query = (searchEl?.value || '').trim().toLowerCase();
+        const filtered = options.filter(opt => {
+            const haystack = [
+                opt.id || '',
+                opt.label || '',
+                ...(Array.isArray(opt.domains) ? opt.domains : []),
+            ].join(' ').toLowerCase();
+            return !query || haystack.includes(query);
+        });
+        host.innerHTML = '';
+        if (!filtered.length) {
+            const empty = document.createElement('div');
+            empty.className = 'px-3 py-2 text-xs text-slate-400 dark:text-slate-500';
+            empty.textContent = t('config_video_yt_dlp_proxy_sites_empty');
+            host.appendChild(empty);
+            return;
+        }
+        filtered.forEach(opt => {
+            const id = opt.id || '';
+            const row = document.createElement('label');
+            row.className = 'flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-white/70 dark:hover:bg-white/5';
+            row.innerHTML = `
+                <input type="checkbox" class="mt-0.5 rounded border-slate-300 dark:border-slate-600 text-primary-500 focus:ring-primary-500"
+                       data-video-yt-proxy-site="${escapeHtml(id)}" ${selected.has(id) ? 'checked' : ''}>
+                <span class="min-w-0">
+                    <span class="block text-sm font-medium text-slate-700 dark:text-slate-200">${escapeHtml(opt.label || id)}</span>
+                    <span class="block text-xs text-slate-400 dark:text-slate-500 break-all">${escapeHtml((opt.domains || []).join(', '))}</span>
+                </span>`;
+            const checkbox = row.querySelector('input');
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) selected.add(id);
+                else selected.delete(id);
+                updateSummary();
+            });
+            host.appendChild(row);
+        });
+        updateSummary();
+    };
+
+    host._videoYtProxySelected = selected;
+    if (triggerEl && panelEl && !triggerEl._videoYtProxyBound) {
+        triggerEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panelEl.classList.toggle('hidden');
+            if (!panelEl.classList.contains('hidden') && searchEl) {
+                searchEl.focus();
+            }
+        });
+        triggerEl._videoYtProxyBound = true;
+    }
+    if (pickerEl && panelEl && !pickerEl._videoYtProxyDocumentBound) {
+        document.addEventListener('click', (e) => {
+            if (!pickerEl.contains(e.target)) {
+                panelEl.classList.add('hidden');
+            }
+        });
+        pickerEl._videoYtProxyDocumentBound = true;
+    }
+    if (searchEl && !searchEl._videoYtProxyBound) {
+        searchEl.addEventListener('input', render);
+        searchEl.addEventListener('click', (e) => e.stopPropagation());
+        searchEl._videoYtProxyBound = true;
+    }
+    if (searchEl) searchEl.value = '';
+    if (panelEl) panelEl.classList.add('hidden');
+    render();
+}
+
 function initVideoParseConfigView(data) {
     const cfg = (data && data.config) || {};
     const setValue = (id, value) => {
@@ -4821,6 +4923,7 @@ function initVideoParseConfigView(data) {
     setValue('cfg-video-api-base', cfg.api_base || 'https://generativelanguage.googleapis.com');
     setValue('cfg-video-upload-api-base', cfg.upload_api_base || cfg.api_base || 'https://generativelanguage.googleapis.com');
     initSecretInput(document.getElementById('cfg-video-proxy'), cfg.proxy_masked || '');
+    renderVideoYtDlpProxySites(cfg);
     setValue('cfg-video-model', cfg.model || 'gemini-2.5-flash');
     updateVideoCookieStatus(cfg);
     setValue('cfg-video-prompt', cfg.prompt || '');
@@ -4864,6 +4967,10 @@ function collectVideoParseConfigPayload() {
     const proxyEl = document.getElementById('cfg-video-proxy');
     if (proxyEl && proxyEl.dataset.masked !== '1') {
         payload.proxy = proxyEl.value.trim();
+    }
+    const proxySitesHost = document.getElementById('cfg-video-yt-proxy-sites');
+    if (proxySitesHost && proxySitesHost._videoYtProxySelected instanceof Set) {
+        payload.yt_dlp_proxy_sites = Array.from(proxySitesHost._videoYtProxySelected);
     }
     const cookieContent = document.getElementById('cfg-video-cookie-content')?.value || '';
     if (cookieContent.trim()) {

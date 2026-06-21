@@ -55,6 +55,7 @@
       "model": "gemini-2.5-flash",
       "cookie_file": "",
       "proxy": "",
+      "yt_dlp_proxy_sites": [],
       "keep_temp": false,
       "delete_source_on_success": true,
       "delete_remote_file": true
