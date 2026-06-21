@@ -20,6 +20,8 @@ import math
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
+from common.proxy import proxy_dict
+
 # HTTP read timeout for a single embeddings request (seconds). A batch of
 # 64+ chunks can take 30-50s end-to-end from China-side networks, so 30s is
 # routinely too tight; 90s gives meaningful headroom without letting bad
@@ -170,6 +172,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         needs_client_normalize: bool = False,
         query_instruction: str = "",
         max_batch_size: int = 256,
+        proxy: Optional[str] = None,
     ):
         """
         Args:
@@ -185,11 +188,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             query_instruction: Optional prefix prepended to query texts only
             max_batch_size: Max items per /embeddings request; embed_batch
                 auto-paginates above this.
+            proxy: Optional HTTP/SOCKS proxy URL shared with model API requests
         """
         self.model = model
         self.api_key = api_key
         self.api_base = api_base or "https://api.openai.com/v1"
         self.extra_headers = extra_headers or {}
+        self.proxies = proxy_dict(proxy or "")
         self.supports_dim_param = supports_dim_param
         self.needs_client_truncate = needs_client_truncate
         self.needs_client_normalize = needs_client_normalize
@@ -223,7 +228,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             data["dimensions"] = self._dimensions
 
         try:
-            response = requests.post(url, headers=headers, json=data, timeout=EMBEDDING_HTTP_TIMEOUT)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=data,
+                timeout=EMBEDDING_HTTP_TIMEOUT,
+                proxies=self.proxies,
+            )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.ConnectionError as e:
@@ -309,11 +320,13 @@ class DoubaoEmbeddingProvider(EmbeddingProvider):
         api_base: Optional[str] = None,
         extra_headers: Optional[dict] = None,
         dimensions: Optional[int] = None,
+        proxy: Optional[str] = None,
     ):
         self.model = model
         self.api_key = api_key
         self.api_base = api_base or "https://ark.cn-beijing.volces.com/api/v3"
         self.extra_headers = extra_headers or {}
+        self.proxies = proxy_dict(proxy or "")
         if not self.api_key or self.api_key in ["", "YOUR API KEY", "YOUR_API_KEY"]:
             raise ValueError("Doubao embedding API key (ark_api_key) is not configured")
 
@@ -346,7 +359,13 @@ class DoubaoEmbeddingProvider(EmbeddingProvider):
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=EMBEDDING_HTTP_TIMEOUT)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=EMBEDDING_HTTP_TIMEOUT,
+                proxies=self.proxies,
+            )
             response.raise_for_status()
             body = response.json()
         except requests.exceptions.ConnectionError as e:
@@ -418,6 +437,7 @@ def create_embedding_provider(
     api_base: Optional[str] = None,
     extra_headers: Optional[dict] = None,
     dimensions: Optional[int] = None,
+    proxy: Optional[str] = None,
 ) -> EmbeddingProvider:
     """
     Factory function to create an embedding provider.
@@ -435,6 +455,7 @@ def create_embedding_provider(
         api_base: API base URL (uses vendor default if None)
         extra_headers: Optional extra HTTP headers
         dimensions: Target output dimension (uses vendor default if None)
+        proxy: Optional HTTP/SOCKS proxy URL shared with model API requests
 
     Returns:
         EmbeddingProvider instance
@@ -455,6 +476,7 @@ def create_embedding_provider(
             api_base=api_base or meta["default_base_url"],
             extra_headers=extra_headers,
             dimensions=final_dim,
+            proxy=proxy,
         )
 
     # Legacy two-arg call for openai/linkai keeps 1536-dim default behavior
@@ -469,6 +491,7 @@ def create_embedding_provider(
             api_key=api_key,
             api_base=api_base,
             extra_headers=extra_headers,
+            proxy=proxy,
         )
 
     final_dim = dimensions if (dimensions and dimensions > 0) else meta["default_dimensions"]
@@ -483,4 +506,5 @@ def create_embedding_provider(
         needs_client_normalize=meta["needs_client_normalize"],
         query_instruction=meta["query_instruction"],
         max_batch_size=meta.get("max_batch_size", 256),
+        proxy=proxy,
     )

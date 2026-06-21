@@ -335,6 +335,7 @@ class AgentInitializer:
 
         embedding_provider = None
         embedding_model = None
+        model_proxy = conf().get("proxy") or None
 
         openai_api_key = conf().get("open_ai_api_key", "")
         openai_api_base = conf().get("open_ai_api_base", "")
@@ -345,7 +346,8 @@ class AgentInitializer:
                     provider="openai",
                     model=model,
                     api_key=openai_api_key,
-                    api_base=openai_api_base or "https://api.openai.com/v1"
+                    api_base=openai_api_base or "https://api.openai.com/v1",
+                    proxy=model_proxy,
                 )
                 embedding_model = f"openai/{model}"
             except Exception as e:
@@ -361,7 +363,8 @@ class AgentInitializer:
                         provider="linkai",
                         model=model,
                         api_key=linkai_api_key,
-                        api_base=f"{linkai_api_base}/v1"
+                        api_base=f"{linkai_api_base}/v1",
+                        proxy=model_proxy,
                     )
                     embedding_model = f"linkai/{model}"
                 except Exception as e:
@@ -428,6 +431,7 @@ class AgentInitializer:
                 api_key=api_key,
                 api_base=api_base,
                 dimensions=dim,
+                proxy=conf().get("proxy") or None,
             )
         except Exception as e:
             logger.error(
