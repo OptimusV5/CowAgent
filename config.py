@@ -111,9 +111,13 @@ available_setting = {
     # Google Gemini Api Key
     "gemini_api_key": "",
     # Embedding model config
-    "embedding_provider": "",  # explicitly set the provider: openai / linkai / dashscope / doubao / zhipu (aligned with bot_type naming)
+    "embedding_provider": "",  # explicitly set the provider: openai / linkai / dashscope / doubao / zhipu / gemini / custom
+    "embedding_provider_type": "",  # custom provider protocol: openai-compatible (gemini uses the gemini provider instead)
+    "embedding_api_key": "",  # optional embedding-specific api key; falls back to the selected provider key
+    "embedding_api_base": "",  # optional embedding-specific api base; falls back to the selected provider base
     "embedding_model": "",     # leave empty to use the provider's default model
-    "embedding_dimensions": 0, # leave empty/0 to use the provider's default dimension (1024 recommended for consistency)
+    "embedding_dimensions": 0, # leave empty/0 to use the provider's default dimension
+    "embedding_proxy": "",  # optional embedding-specific proxy; same provider as the main model falls back to proxy
     # voice config
     "speech_recognition": True,  # whether to enable speech recognition
     "group_speech_recognition": False,  # whether to enable group speech recognition
@@ -451,6 +455,8 @@ def load_config():
         "open_ai_api_base": "OPENAI_API_BASE",
         "voice_to_text_api_key": "VOICE_TO_TEXT_API_KEY",
         "voice_to_text_api_base": "VOICE_TO_TEXT_API_BASE",
+        "embedding_api_key": "EMBEDDING_API_KEY",
+        "embedding_api_base": "EMBEDDING_API_BASE",
         "linkai_api_key": "LINKAI_API_KEY",
         "linkai_api_base": "LINKAI_API_BASE",
         "claude_api_key": "CLAUDE_API_KEY",

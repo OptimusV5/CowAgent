@@ -59,6 +59,13 @@ const I18N = {
         models_capability_tts_desc: '文字转语音',
         models_capability_embedding: '向量',
         models_capability_embedding_desc: '用于记忆与知识的向量化检索',
+        models_embedding_api_base: '向量 API Base',
+        models_embedding_api_key: '向量 API Key',
+        models_embedding_proxy: '向量 API 代理',
+        models_embedding_dimensions: '向量维度',
+        models_embedding_custom_title: '向量 API 配置',
+        models_embedding_custom_hint: 'Gemini 使用原生 batchEmbedContents；Custom 使用 OpenAI-compatible /embeddings。',
+        models_embedding_proxy_inherited: '当前跟随基础模型代理',
         models_capability_search: '联网搜索',
         models_capability_search_desc: '实时网页检索能力，用于搜索工具',
         models_strategy_auto: '自动',
@@ -327,6 +334,13 @@ const I18N = {
         models_capability_tts_desc: 'Text to voice',
         models_capability_embedding: 'Embedding',
         models_capability_embedding_desc: 'Used for vectorized retrieval of memory and knowledge',
+        models_embedding_api_base: 'Embedding API Base',
+        models_embedding_api_key: 'Embedding API Key',
+        models_embedding_proxy: 'Embedding API Proxy',
+        models_embedding_dimensions: 'Embedding Dimensions',
+        models_embedding_custom_title: 'Embedding API settings',
+        models_embedding_custom_hint: 'Gemini uses native batchEmbedContents; Custom uses OpenAI-compatible /embeddings.',
+        models_embedding_proxy_inherited: 'Currently follows the main model proxy',
         models_capability_search: 'Web Search',
         models_capability_search_desc: 'Real-time web retrieval, used by search tools',
         models_strategy_auto: 'auto',
@@ -5355,7 +5369,7 @@ const MODELS_CAPABILITY_DEFS = [
       iconChip: 'bg-amber-50 dark:bg-amber-900/30',      iconGlyph: 'text-amber-500' },
     { id: 'tts',       icon: 'fa-volume-high',      editable: true,  needsModel: true,  titleKey: 'models_capability_tts',       descKey: 'models_capability_tts_desc',
       iconChip: 'bg-amber-50 dark:bg-amber-900/30',      iconGlyph: 'text-amber-500' },
-    { id: 'embedding', icon: 'fa-vector-square',    editable: true,  needsModel: false, titleKey: 'models_capability_embedding', descKey: 'models_capability_embedding_desc',
+    { id: 'embedding', icon: 'fa-vector-square',    editable: true,  needsModel: true,  titleKey: 'models_capability_embedding', descKey: 'models_capability_embedding_desc',
       iconChip: 'bg-purple-50 dark:bg-purple-900/30',    iconGlyph: 'text-purple-500' },
     { id: 'search',    icon: 'fa-magnifying-glass', editable: true,  needsModel: false, titleKey: 'models_capability_search',    descKey: 'models_capability_search_desc',
       iconChip: 'bg-orange-50 dark:bg-orange-900/30',    iconGlyph: 'text-orange-500' },
@@ -6025,6 +6039,9 @@ function renderCapabilityBody(def, cap, body) {
     if (def.id === 'asr') {
         renderAsrProviderInstance(body, cap);
     }
+    if (def.id === 'embedding') {
+        renderEmbeddingProviderConfig(body, cap);
+    }
 
     // `body` is still detached from `document`; scope lookups locally.
     const provDd = body.querySelector(`#cap-${def.id}-provider`);
@@ -6101,6 +6118,96 @@ function renderCapabilityBody(def, cap, body) {
     if (def.id === 'asr') {
         updateAsrProviderInstanceVisibility(initialProviderValue, body);
     }
+    if (def.id === 'embedding') {
+        updateEmbeddingProviderConfig(initialProviderValue, body);
+    }
+}
+
+function attachMaskedInputUnlock(input) {
+    if (!input) return;
+    const unmask = () => {
+        if (input.dataset.masked === '1') {
+            input.value = '';
+            input.dataset.masked = '';
+            input.classList.remove('cfg-key-masked');
+        }
+    };
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab' || e.key === 'Escape') return;
+        unmask();
+    });
+    input.addEventListener('paste', unmask);
+}
+
+function renderEmbeddingProviderConfig(body, cap) {
+    const maskedKey = (cap && cap.api_key_masked) || '';
+    const hasKey = !!maskedKey;
+    const apiBase = (cap && cap.api_base) || '';
+    const proxyMasked = (cap && cap.proxy_masked) || '';
+    const hasProxy = !!proxyMasked;
+    const dim = (cap && cap.current_dim) || '';
+    const wrap = document.createElement('div');
+    wrap.id = 'cap-embedding-config';
+    wrap.className = 'pt-3 border-t border-slate-100 dark:border-white/10 space-y-3';
+    wrap.innerHTML = `
+        <div>
+            <p class="text-sm font-medium text-slate-700 dark:text-slate-200">${t('models_embedding_custom_title')}</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">${t('models_embedding_custom_hint')}</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_embedding_api_base')}</label>
+                <input id="cap-embedding-api-base" type="text" autocomplete="off" spellcheck="false"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                       value="${escapeHtml(apiBase)}"
+                       placeholder="https://....." />
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_embedding_api_key')}</label>
+                <input id="cap-embedding-api-key" type="text" autocomplete="off" data-1p-ignore data-lpignore="true"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors ${hasKey ? 'cfg-key-masked' : ''}"
+                       value="${escapeHtml(maskedKey)}"
+                       data-masked="${hasKey ? '1' : ''}"
+                       data-had-key="${hasKey ? '1' : ''}"
+                       placeholder="sk-..." />
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_embedding_dimensions')}</label>
+                <input id="cap-embedding-dimensions" type="number" min="0" step="1"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                       value="${escapeHtml(String(dim || ''))}"
+                       placeholder="1536" />
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_embedding_proxy')}</label>
+                <input id="cap-embedding-proxy" type="text" autocomplete="off" spellcheck="false"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors ${hasProxy ? 'cfg-key-masked' : ''}"
+                       value="${escapeHtml(proxyMasked)}"
+                       data-masked="${hasProxy ? '1' : ''}"
+                       data-had-proxy="${hasProxy ? '1' : ''}"
+                       placeholder="socks5h://127.0.0.1:1080" />
+                <p id="cap-embedding-proxy-hint" class="text-xs text-slate-400 dark:text-slate-500 mt-1 hidden">${t('models_embedding_proxy_inherited')}</p>
+            </div>
+        </div>`;
+
+    const modelWrap = body.querySelector('#cap-embedding-model-wrap');
+    if (modelWrap && modelWrap.parentNode) {
+        modelWrap.parentNode.insertBefore(wrap, modelWrap.nextSibling);
+    } else {
+        body.appendChild(wrap);
+    }
+    attachMaskedInputUnlock(wrap.querySelector('#cap-embedding-api-key'));
+    attachMaskedInputUnlock(wrap.querySelector('#cap-embedding-proxy'));
 }
 
 function renderAsrProviderInstance(body, cap) {
@@ -6211,6 +6318,33 @@ function updateAsrProviderInstanceVisibility(providerId, scope) {
     const wrap = root.querySelector('#cap-asr-openai-instance');
     if (!wrap) return;
     wrap.classList.toggle('hidden', providerId !== 'openai');
+}
+
+function updateEmbeddingProviderConfig(providerId, scope) {
+    const root = scope || document;
+    const wrap = root.querySelector('#cap-embedding-config');
+    if (!wrap) return;
+    wrap.classList.toggle('hidden', !providerId);
+    if (!providerId) return;
+
+    const baseInput = root.querySelector('#cap-embedding-api-base');
+    const dimInput = root.querySelector('#cap-embedding-dimensions');
+    const hint = root.querySelector('#cap-embedding-proxy-hint');
+    const cap = modelsState.capabilities.embedding || {};
+
+    if (baseInput && !baseInput.value) {
+        if (providerId === 'gemini') baseInput.placeholder = 'https://generativelanguage.googleapis.com';
+        else if (providerId === 'custom') baseInput.placeholder = 'https://...../v1';
+        else baseInput.placeholder = '';
+    }
+    if (dimInput && !dimInput.value) {
+        if (providerId === 'gemini') dimInput.placeholder = '1536';
+        else if (providerId === 'doubao') dimInput.placeholder = '1024';
+        else dimInput.placeholder = '1536';
+    }
+    if (hint) {
+        hint.classList.toggle('hidden', !(cap.proxy_inherits_main && !cap.proxy_configured));
+    }
 }
 
 // TTS reply-policy dropdown (off / voice_if_voice / always). Persists on
@@ -6333,7 +6467,8 @@ function buildCapabilityProviderOptions(def, cap) {
         const tracked = !!meta;
         const override = cap.provider_overrides && cap.provider_overrides[pid];
         const inlineConfigurable = def.id === 'asr' && pid === 'openai';
-        const configured = inlineConfigurable || !!(override && override.configured) || !tracked || !!meta.configured;
+        const embeddingInline = def.id === 'embedding' && (pid === 'custom' || pid === 'gemini');
+        const configured = inlineConfigurable || embeddingInline || !!(override && override.configured) || !tracked || !!meta.configured;
         return {
             value: pid,
             label: (meta && localizedLabel(meta.label)) || pid,
@@ -6633,6 +6768,9 @@ function onCapabilityProviderChange(def, providerId, scope) {
     if (def.id === 'asr') {
         updateAsrProviderInstanceVisibility(providerId, scope);
     }
+    if (def.id === 'embedding') {
+        updateEmbeddingProviderConfig(providerId, scope);
+    }
     const body = scope || document.querySelector(`[data-cap-body="${def.id}"]`);
     if (body) {
         const cap = modelsState.capabilities[def.id] || {};
@@ -6674,6 +6812,33 @@ function getAsrProviderInstancePayload(provider) {
     return payload;
 }
 
+function getEmbeddingProviderPayload(provider) {
+    const payload = {};
+    payload.embedding_provider_type = provider === 'custom'
+        ? 'openai-compatible'
+        : (provider === 'gemini' ? 'gemini' : '');
+
+    const baseInput = document.getElementById('cap-embedding-api-base');
+    const keyInput = document.getElementById('cap-embedding-api-key');
+    const dimInput = document.getElementById('cap-embedding-dimensions');
+    const proxyInput = document.getElementById('cap-embedding-proxy');
+
+    if (baseInput) payload.embedding_api_base = baseInput.value.trim();
+    if (dimInput) payload.embedding_dimensions = dimInput.value.trim();
+    if (keyInput && keyInput.dataset.masked !== '1') {
+        const value = keyInput.value.trim();
+        if (value) {
+            payload.embedding_api_key = value;
+        } else if (keyInput.dataset.hadKey === '1') {
+            payload.embedding_api_key_clear = true;
+        }
+    }
+    if (proxyInput && proxyInput.dataset.masked !== '1') {
+        payload.embedding_proxy = proxyInput.value.trim();
+    }
+    return payload;
+}
+
 function saveCapability(capId) {
     const def = MODELS_CAPABILITY_DEFS.find(d => d.id === capId);
     if (!def || !def.editable) return;
@@ -6705,7 +6870,11 @@ function saveCapability(capId) {
         const cap = modelsState.capabilities[capId] || {};
         const before = (cap.current_provider || '').trim();
         const after = (provider || '').trim();
-        if (before !== after) {
+        const embeddingExtras = getEmbeddingProviderPayload(provider);
+        const beforeModel = (cap.current_model || '').trim();
+        const beforeDim = cap.current_dim ? String(cap.current_dim) : '';
+        const afterDim = (embeddingExtras.embedding_dimensions || '').trim();
+        if (before !== after || beforeModel !== (model || '').trim() || beforeDim !== afterDim) {
             showConfirmDialog({
                 title: t('models_embedding_change_title'),
                 message: t('models_embedding_change_msg'),
@@ -6732,7 +6901,7 @@ function saveCapability(capId) {
                             }, 60);
                         },
                     });
-                }),
+                }, embeddingExtras),
             });
             return;
         }
@@ -6740,6 +6909,9 @@ function saveCapability(capId) {
     const extras = { voice };
     if (capId === 'asr') {
         Object.assign(extras, getAsrProviderInstancePayload(provider));
+    }
+    if (capId === 'embedding') {
+        Object.assign(extras, getEmbeddingProviderPayload(provider));
     }
     _persistCapability(capId, provider, model, undefined, extras);
 }
@@ -6751,6 +6923,12 @@ function _persistCapability(capId, provider, model, onAfterSuccess, extras) {
     if (extras && extras.asr_api_key !== undefined) payload.asr_api_key = extras.asr_api_key;
     if (extras && extras.asr_api_key_clear !== undefined) payload.asr_api_key_clear = extras.asr_api_key_clear;
     if (extras && extras.asr_proxy !== undefined) payload.asr_proxy = extras.asr_proxy;
+    if (extras && extras.embedding_provider_type !== undefined) payload.embedding_provider_type = extras.embedding_provider_type;
+    if (extras && extras.embedding_api_base !== undefined) payload.embedding_api_base = extras.embedding_api_base;
+    if (extras && extras.embedding_api_key !== undefined) payload.embedding_api_key = extras.embedding_api_key;
+    if (extras && extras.embedding_api_key_clear !== undefined) payload.embedding_api_key_clear = extras.embedding_api_key_clear;
+    if (extras && extras.embedding_dimensions !== undefined) payload.embedding_dimensions = extras.embedding_dimensions;
+    if (extras && extras.embedding_proxy !== undefined) payload.embedding_proxy = extras.embedding_proxy;
     fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

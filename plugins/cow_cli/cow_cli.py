@@ -1334,10 +1334,19 @@ class CowCliPlugin(Plugin):
                 return "linkai (legacy)", "text-embedding-3-small", 1536
             return "(legacy)", None, None
 
-        meta = EMBEDDING_VENDORS.get(provider_key) or {}
+        if provider_key == "custom":
+            provider_type = (conf().get("embedding_provider_type") or "openai-compatible").strip()
+            meta = {
+                "default_model": "text-embedding-3-small",
+                "default_dimensions": 1536,
+            }
+        else:
+            provider_type = ""
+            meta = EMBEDDING_VENDORS.get(provider_key) or {}
         model = cfg_model or meta.get("default_model")
         dim = cfg_dim if cfg_dim > 0 else meta.get("default_dimensions")
-        return provider_key, model, dim
+        label = f"{provider_key} ({provider_type})" if provider_type else provider_key
+        return label, model, dim
 
     def _memory_status(self) -> str:
         """Show current memory index status."""

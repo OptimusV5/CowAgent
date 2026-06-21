@@ -335,7 +335,6 @@ class AgentInitializer:
 
         embedding_provider = None
         embedding_model = None
-        model_proxy = conf().get("proxy") or None
 
         openai_api_key = conf().get("open_ai_api_key", "")
         openai_api_base = conf().get("open_ai_api_base", "")
@@ -347,7 +346,7 @@ class AgentInitializer:
                     model=model,
                     api_key=openai_api_key,
                     api_base=openai_api_base or "https://api.openai.com/v1",
-                    proxy=model_proxy,
+                    proxy=self._resolve_embedding_proxy("openai"),
                 )
                 embedding_model = f"openai/{model}"
             except Exception as e:
@@ -364,7 +363,7 @@ class AgentInitializer:
                         model=model,
                         api_key=linkai_api_key,
                         api_base=f"{linkai_api_base}/v1",
-                        proxy=model_proxy,
+                        proxy=self._resolve_embedding_proxy("linkai"),
                     )
                     embedding_model = f"linkai/{model}"
                 except Exception as e:
@@ -398,11 +397,25 @@ class AgentInitializer:
         from agent.memory.embedding import EMBEDDING_VENDORS
         from config import conf
 
-        meta = EMBEDDING_VENDORS.get(provider_key)
+        provider_type = (conf().get("embedding_provider_type") or "").strip().lower()
+        if provider_key == "custom":
+            meta = {
+                "default_base_url": "",
+                "default_model": "text-embedding-3-small",
+                "default_dimensions": 1536,
+            }
+            if provider_type not in ("", "openai", "openai-compatible", "openai_compatible"):
+                logger.error(
+                    f"[AgentInitializer] Unsupported custom embedding_provider_type "
+                    f"'{provider_type}'. Supported: openai-compatible."
+                )
+                return None
+        else:
+            meta = EMBEDDING_VENDORS.get(provider_key)
         if meta is None:
             logger.error(
                 f"[AgentInitializer] Unknown embedding_provider '{provider_key}'. "
-                f"Supported: {sorted(EMBEDDING_VENDORS.keys())}. "
+                f"Supported: {sorted(list(EMBEDDING_VENDORS.keys()) + ['custom'])}. "
                 f"Memory will run in keyword-only mode."
             )
             return None
@@ -431,7 +444,8 @@ class AgentInitializer:
                 api_key=api_key,
                 api_base=api_base,
                 dimensions=dim,
-                proxy=conf().get("proxy") or None,
+                provider_type=provider_type,
+                proxy=self._resolve_embedding_proxy(provider_key),
             )
         except Exception as e:
             logger.error(
@@ -454,12 +468,17 @@ class AgentInitializer:
         """Pick the API key for an explicit embedding provider from config."""
         from config import conf
 
+        override = conf().get("embedding_api_key", "") or os.environ.get("EMBEDDING_API_KEY", "")
+        if override and override not in ["", "YOUR API KEY", "YOUR_API_KEY"]:
+            return override
+
         key_map = {
             "openai":    "open_ai_api_key",
             "linkai":    "linkai_api_key",
             "dashscope": "dashscope_api_key",
             "doubao":    "ark_api_key",
             "zhipu":     "zhipu_ai_api_key",
+            "gemini":    "gemini_api_key",
         }
         field = key_map.get(provider_key)
         if not field:
@@ -474,11 +493,16 @@ class AgentInitializer:
         """Pick the API base for an explicit embedding provider from config."""
         from config import conf
 
+        override = (conf().get("embedding_api_base") or os.environ.get("EMBEDDING_API_BASE", "") or "").strip()
+        if override:
+            return override
+
         base_map = {
             "openai":    "open_ai_api_base",
             "linkai":    "linkai_api_base",
             "doubao":    "ark_base_url",
             "zhipu":     "zhipu_ai_api_base",
+            "gemini":    "gemini_api_base",
         }
         field = base_map.get(provider_key)
         if not field:
@@ -489,6 +513,66 @@ class AgentInitializer:
         if provider_key == "linkai" and not value.rstrip("/").endswith("/v1"):
             return f"{value.rstrip('/')}/v1"
         return value
+
+    @staticmethod
+    def _resolve_embedding_proxy(provider_key: str) -> Optional[str]:
+        """Pick the proxy for embedding API calls.
+
+        Embedding-specific proxy wins. If omitted, only reuse the main model
+        proxy when the embedding provider is the same vendor as the main bot.
+        Other embedding APIs are direct unless the user configures
+        embedding_proxy explicitly.
+        """
+        from config import conf
+
+        explicit = (conf().get("embedding_proxy") or "").strip()
+        if explicit:
+            return explicit
+
+        main_provider = AgentInitializer._resolve_main_provider_for_proxy()
+        if main_provider == "chatGPT":
+            main_provider = "openai"
+        if main_provider.startswith("custom:"):
+            main_provider = "custom"
+        if provider_key == main_provider:
+            return conf().get("proxy") or None
+        return None
+
+    @staticmethod
+    def _resolve_main_provider_for_proxy() -> str:
+        """Resolve the active chat provider enough for proxy inheritance."""
+        from common import const
+        from config import conf
+
+        if conf().get("use_linkai", False) and conf().get("linkai_api_key"):
+            return const.LINKAI
+
+        configured = (conf().get("bot_type") or "").strip()
+        if configured:
+            return "openai" if configured == "chatGPT" else configured
+
+        model = (conf().get("model") or "").strip().lower()
+        if not model:
+            return "openai"
+        prefix_map = [
+            ("qwen", const.QWEN_DASHSCOPE),
+            ("qwq", const.QWEN_DASHSCOPE),
+            ("qvq", const.QWEN_DASHSCOPE),
+            ("gemini", const.GEMINI),
+            ("glm", const.ZHIPU_AI),
+            ("claude", const.CLAUDEAPI),
+            ("moonshot", const.MOONSHOT),
+            ("kimi", const.MOONSHOT),
+            ("doubao", const.DOUBAO),
+            ("deepseek", const.DEEPSEEK),
+            ("ernie", const.QIANFAN),
+            ("mimo-", const.MIMO),
+            ("minimax", const.MiniMax),
+        ]
+        for prefix, provider in prefix_map:
+            if model.startswith(prefix):
+                return provider
+        return "openai"
     
     def _sync_memory(self, memory_manager, session_id: Optional[str] = None):
         """Sync memory database"""

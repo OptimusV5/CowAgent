@@ -3,7 +3,7 @@ Embedding subsystem for memory.
 
 Public API:
   create_embedding_provider, EmbeddingProvider, OpenAIEmbeddingProvider,
-  EMBEDDING_VENDORS, EmbeddingCache
+  GeminiEmbeddingProvider, EMBEDDING_VENDORS, EmbeddingCache
   RebuildResult, clear_index, rebuild_in_process
   detect_index_dim, cleanup_legacy_state_file
 """
@@ -13,6 +13,7 @@ from agent.memory.embedding.provider import (
     DoubaoEmbeddingProvider,
     EmbeddingCache,
     EmbeddingProvider,
+    GeminiEmbeddingProvider,
     OpenAIEmbeddingProvider,
     create_embedding_provider,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "DoubaoEmbeddingProvider",
     "EmbeddingCache",
     "EmbeddingProvider",
+    "GeminiEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "create_embedding_provider",
     "RebuildResult",

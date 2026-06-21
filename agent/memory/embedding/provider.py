@@ -7,12 +7,14 @@ Supports multiple OpenAI-compatible embedding vendors:
   - dashscope  (Aliyun Tongyi text-embedding-v4)
   - doubao     (ByteDance Doubao Seed1.5 / large-text on Volcengine Ark)
   - zhipu      (ZhipuAI embedding-3)
+  - gemini     (Google Gemini batchEmbedContents)
 
 Vendor keys here intentionally match the project's bot_type constants in
 common.const (OPENAI, LINKAI, QWEN_DASHSCOPE, DOUBAO, ZHIPU_AI).
 
-All providers share a single OpenAI-compatible REST client. Vendor-specific
-behaviors (truncation, query instruction prefix) are configured via metadata.
+Most providers share a single OpenAI-compatible REST client. Vendor-specific
+behaviors (truncation, query instruction prefix, Gemini native API) are
+configured via metadata.
 """
 
 import hashlib
@@ -58,8 +60,8 @@ class EmbeddingProvider(ABC):
 # ---------------------------------------------------------------------------
 #
 # Each entry describes how to reach a vendor's embedding endpoint. Most
-# vendors expose an OpenAI-compatible /embeddings API; the few that don't
-# (currently: doubao) set `provider_class` to pick a dedicated adapter.
+# vendors expose an OpenAI-compatible /embeddings API; the few that don't set
+# `provider_class` to pick a dedicated adapter.
 # Fields:
 #   provider_class          : optional adapter key ("doubao"); defaults to OpenAI-compat
 #   default_base_url        : default API base when not overridden by user
@@ -130,6 +132,19 @@ EMBEDDING_VENDORS = {
         # a single document's parts, not a batch). embed_batch loops.
         "max_batch_size": 1,
     },
+    "gemini": {
+        "provider_class": "gemini",
+        "default_base_url": "https://generativelanguage.googleapis.com",
+        "default_model": "gemini-embedding-2",
+        # 1536 keeps storage/query cost close to the existing OpenAI default.
+        # Users can choose 768 or 3072 when they want smaller or full vectors.
+        "default_dimensions": 1536,
+        "supports_dim_param": True,
+        "needs_client_truncate": False,
+        "needs_client_normalize": False,
+        "query_instruction": "",
+        "max_batch_size": 100,
+    },
     "zhipu": {
         "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
         "default_model": "embedding-3",
@@ -141,6 +156,17 @@ EMBEDDING_VENDORS = {
         "max_batch_size": 64,
     },
 }
+
+
+def _is_gemini_embedding_001(model: str) -> bool:
+    return (model or "").strip().lower().endswith("gemini-embedding-001")
+
+
+def _gemini_model_name(model: str) -> str:
+    model = (model or "").strip()
+    if model.startswith("models/"):
+        return model
+    return f"models/{model}"
 
 
 def _l2_normalize(vec: List[float]) -> List[float]:
@@ -407,6 +433,135 @@ class DoubaoEmbeddingProvider(EmbeddingProvider):
         return self._dimensions
 
 
+class GeminiEmbeddingProvider(EmbeddingProvider):
+    """Google Gemini native embedding provider using batchEmbedContents."""
+
+    def __init__(
+        self,
+        model: str = "gemini-embedding-2",
+        api_key: Optional[str] = None,
+        api_base: Optional[str] = None,
+        dimensions: Optional[int] = None,
+        proxy: Optional[str] = None,
+        max_batch_size: int = 100,
+    ):
+        self.model = model or "gemini-embedding-2"
+        self.model_name = _gemini_model_name(self.model)
+        self.api_key = api_key
+        self.api_base = (api_base or "https://generativelanguage.googleapis.com").rstrip("/")
+        self.proxies = proxy_dict(proxy or "")
+        self.max_batch_size = max(1, int(max_batch_size or 1))
+        self._dimensions = int(dimensions or 1536)
+
+        if not self.api_key or self.api_key in ["", "YOUR API KEY", "YOUR_API_KEY"]:
+            raise ValueError("Gemini embedding API key is not configured")
+        if self._dimensions < 128 or self._dimensions > 3072:
+            raise ValueError(f"Gemini embedding dimensions must be between 128 and 3072, got {self._dimensions}")
+
+        self._is_001 = _is_gemini_embedding_001(self.model)
+
+    def _format_document_text(self, text: str) -> str:
+        if self._is_001:
+            return text
+        return f"title: none | text: {text}"
+
+    def _format_query_text(self, text: str) -> str:
+        if self._is_001:
+            return text
+        return f"task: search result | query: {text}"
+
+    def _build_request(self, text: str, is_query: bool = False) -> dict:
+        content_text = self._format_query_text(text) if is_query else self._format_document_text(text)
+        request = {
+            "model": self.model_name,
+            "content": {
+                "parts": [{"text": content_text}],
+            },
+            "outputDimensionality": self._dimensions,
+        }
+        if self._is_001:
+            request["taskType"] = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
+        return request
+
+    def _call_batch(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
+        import requests
+
+        if not texts:
+            return []
+
+        if self.api_base.rstrip("/").split("/")[-1].startswith("v"):
+            url = f"{self.api_base}/{self.model_name}:batchEmbedContents"
+        else:
+            url = f"{self.api_base}/v1beta/{self.model_name}:batchEmbedContents"
+        params = {"key": self.api_key}
+        payload = {
+            "requests": [self._build_request(text, is_query=is_query) for text in texts],
+        }
+
+        try:
+            response = requests.post(
+                url,
+                params=params,
+                json=payload,
+                timeout=EMBEDDING_HTTP_TIMEOUT,
+                proxies=self.proxies,
+            )
+            response.raise_for_status()
+            body = response.json()
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(
+                f"Failed to connect to Gemini embedding API at {url}. "
+                f"Please check network and api_base. Error: {str(e)}"
+            )
+        except requests.exceptions.Timeout as e:
+            raise TimeoutError(f"Gemini embedding API request timed out. Error: {str(e)}")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            text = e.response.text if e.response is not None else str(e)
+            if status == 401:
+                raise ValueError("Invalid Gemini embedding API key")
+            elif status == 429:
+                raise ValueError("Gemini embedding API rate limit exceeded")
+            raise ValueError(f"Gemini embedding API request failed: {status} - {text}")
+
+        embeddings = body.get("embeddings")
+        if not isinstance(embeddings, list):
+            raise ValueError(f"Unexpected Gemini embedding response shape: {body}")
+
+        vectors: List[List[float]] = []
+        for item in embeddings:
+            values = item.get("values") if isinstance(item, dict) else None
+            if not isinstance(values, list):
+                raise ValueError(f"Unexpected Gemini embedding item shape: {item}")
+            if self._is_001 and self._dimensions != 3072:
+                values = _l2_normalize(values)
+            vectors.append(values)
+        if len(vectors) != len(texts):
+            raise ValueError(
+                f"Gemini embedding response count mismatch: got {len(vectors)}, expected {len(texts)}"
+            )
+        return vectors
+
+    def embed(self, text: str) -> List[float]:
+        return self._call_batch([text], is_query=False)[0]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._call_batch([text], is_query=True)[0]
+
+    def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+        out: List[List[float]] = []
+        step = self.max_batch_size
+        for i in range(0, len(texts), step):
+            out.extend(self._call_batch(texts[i:i + step], is_query=False))
+        return out
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+
 class EmbeddingCache:
     """In-memory cache for embeddings to avoid recomputation"""
 
@@ -432,6 +587,7 @@ class EmbeddingCache:
 
 def create_embedding_provider(
     provider: str = "openai",
+    provider_type: Optional[str] = None,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
@@ -450,6 +606,7 @@ def create_embedding_provider(
 
     Args:
         provider: Vendor key (one of EMBEDDING_VENDORS)
+        provider_type: Protocol for custom providers (openai-compatible)
         model: Model name (uses vendor default if None)
         api_key: API key (required)
         api_base: API base URL (uses vendor default if None)
@@ -460,11 +617,45 @@ def create_embedding_provider(
     Returns:
         EmbeddingProvider instance
     """
-    meta = EMBEDDING_VENDORS.get(provider)
+    provider = (provider or "openai").strip().lower()
+    provider_type = (provider_type or "").strip().lower()
+
+    if provider == "custom":
+        if provider_type in ("", "openai", "openai-compatible", "openai_compatible"):
+            if not api_base:
+                raise ValueError("embedding_api_base is required for custom OpenAI-compatible embedding provider")
+            meta = {
+                "default_base_url": api_base or "",
+                "default_model": model or "text-embedding-3-small",
+                "default_dimensions": dimensions or 1536,
+                "supports_dim_param": True,
+                "needs_client_truncate": False,
+                "needs_client_normalize": False,
+                "query_instruction": "",
+                "max_batch_size": 64,
+            }
+        else:
+            raise ValueError(
+                f"Unsupported custom embedding provider_type: {provider_type}. "
+                "Supported: openai-compatible"
+            )
+    else:
+        meta = EMBEDDING_VENDORS.get(provider)
     if meta is None:
         raise ValueError(
             f"Unsupported embedding provider: {provider}. "
-            f"Supported: {sorted(EMBEDDING_VENDORS.keys())}"
+            f"Supported: {sorted(list(EMBEDDING_VENDORS.keys()) + ['custom'])}"
+        )
+
+    if meta.get("provider_class") == "gemini":
+        final_dim = dimensions if (dimensions and dimensions > 0) else meta["default_dimensions"]
+        return GeminiEmbeddingProvider(
+            model=model or meta["default_model"],
+            api_key=api_key,
+            api_base=api_base or meta["default_base_url"],
+            dimensions=final_dim,
+            proxy=proxy,
+            max_batch_size=meta.get("max_batch_size", 100),
         )
 
     # Doubao uses a non-OpenAI-compatible multimodal endpoint.

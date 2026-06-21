@@ -2086,7 +2086,34 @@ class ModelsHandler:
             ],
         },
     }
-    _EMBEDDING_PROVIDERS = ["openai", "dashscope", "doubao", "zhipu", "linkai"]
+    _EMBEDDING_PROVIDERS = ["openai", "gemini", "dashscope", "doubao", "zhipu", "linkai", "custom"]
+    _EMBEDDING_PROVIDER_MODELS = {
+        "openai": [
+            {"value": "text-embedding-3-small", "hint": "默认 · 1536 维"},
+            {"value": "text-embedding-3-large", "hint": "更高质量 · 3072 维"},
+        ],
+        "gemini": [
+            {"value": "gemini-embedding-2", "hint": "推荐 · 多模态 · 默认 1536 维"},
+            {"value": "gemini-embedding-001", "hint": "旧版兼容 · 文本 · 需重建索引"},
+        ],
+        "dashscope": [
+            {"value": "text-embedding-v4", "hint": "通义 · 默认 1024 维"},
+        ],
+        "doubao": [
+            {"value": "doubao-embedding-vision-251215", "hint": "豆包 · 1024/2048 维"},
+        ],
+        "zhipu": [
+            {"value": "embedding-3", "hint": "智谱 · 默认 1024 维"},
+        ],
+        "linkai": [
+            {"value": "text-embedding-3-small", "hint": "OpenAI 兼容"},
+            {"value": "text-embedding-3-large", "hint": "OpenAI 兼容"},
+        ],
+        "custom": [
+            {"value": "text-embedding-3-small", "hint": "OpenAI-compatible"},
+            {"value": "text-embedding-3-large", "hint": "OpenAI-compatible"},
+        ],
+    }
 
     # Capability-scoped model catalogs. The chat dropdown can reuse the
     # provider's generic model list, but vision and image generation are
@@ -2569,22 +2596,66 @@ class ModelsHandler:
         # preselects the dropdown to whichever configured vendor we'd
         # recommend, so users don't have to expand the menu to find it.
         explicit = (local_config.get("embedding_provider") or "").strip().lower()
+        provider_type = (local_config.get("embedding_provider_type") or "").strip().lower()
+        if explicit and explicit not in cls._EMBEDDING_PROVIDERS:
+            explicit = ""
         suggested = ""
         if not explicit:
             for pid in cls._EMBEDDING_PROVIDERS:
+                if pid == "custom":
+                    continue
                 meta = ConfigHandler.PROVIDER_MODELS.get(pid) or {}
                 key_field = meta.get("api_key_field")
                 if key_field and cls._is_real_key(local_config.get(key_field, "")):
                     suggested = pid
                     break
+        api_key = local_config.get("embedding_api_key", "")
+        api_base = local_config.get("embedding_api_base", "")
+        proxy = local_config.get("embedding_proxy", "")
         return {
             "editable": True,
             "current_provider": explicit,
+            "current_provider_type": provider_type or ("openai-compatible" if explicit == "custom" else ""),
             "suggested_provider": suggested,
             "current_model": local_config.get("embedding_model", "") or "",
             "current_dim": int(local_config.get("embedding_dimensions") or 0) or None,
             "providers": cls._EMBEDDING_PROVIDERS,
+            "provider_models": cls._EMBEDDING_PROVIDER_MODELS,
+            "dimension_options": {
+                "gemini": [768, 1536, 3072],
+                "doubao": [1024, 2048],
+                "default": [1024, 1536, 3072],
+            },
+            "api_key_masked": ConfigHandler._mask_key(api_key) if cls._is_real_key(api_key) else "",
+            "api_key_configured": cls._is_real_key(api_key),
+            "api_base": api_base or "",
+            "proxy_masked": mask_proxy_url(proxy),
+            "proxy_configured": bool(proxy),
+            "proxy_inherits_main": cls._embedding_proxy_inherits_main(local_config, explicit),
         }
+
+    @staticmethod
+    def _embedding_proxy_inherits_main(local_config: dict, provider_id: str) -> bool:
+        if not provider_id or local_config.get("embedding_proxy"):
+            return False
+        main_provider = (local_config.get("bot_type") or "").strip()
+        if main_provider == "chatGPT":
+            main_provider = "openai"
+        if main_provider.startswith("custom:"):
+            main_provider = "custom"
+        if not main_provider:
+            model = (local_config.get("model") or "").strip().lower()
+            if model.startswith("gemini"):
+                main_provider = "gemini"
+            elif model.startswith(("qwen", "qwq", "qvq")):
+                main_provider = "dashscope"
+            elif model.startswith("glm"):
+                main_provider = "zhipu"
+            elif model.startswith("doubao"):
+                main_provider = "doubao"
+            else:
+                main_provider = "openai"
+        return provider_id == main_provider and bool(local_config.get("proxy"))
 
     # Auto-fallback order for image generation. Mirrors the global priority
     # used inside skills/image-generation/scripts/generate.py
@@ -3070,7 +3141,7 @@ class ModelsHandler:
         if capability == "tts":
             return self._set_tts(provider_id, model, (data.get("voice") or "").strip())
         if capability == "embedding":
-            return self._set_embedding(provider_id, model)
+            return self._set_embedding(provider_id, model, data)
         if capability == "image":
             return self._set_image(provider_id, model)
         if capability == "search":
@@ -3323,7 +3394,8 @@ class ModelsHandler:
         except Exception as e:
             logger.warning(f"[ModelsHandler] Bridge voice refresh failed: {e}")
 
-    def _set_embedding(self, provider_id: str, model: str) -> str:
+    def _set_embedding(self, provider_id: str, model: str, data: dict = None) -> str:
+        data = data or {}
         # Two valid states: both empty (reset to pick-or-empty) OR both set.
         # A provider without a model leaves the runtime in a broken half-state,
         # so reject that explicitly instead of silently writing it through.
@@ -3332,14 +3404,75 @@ class ModelsHandler:
                 "status": "error",
                 "message": "embedding model is required when a provider is selected",
             })
+        if provider_id and provider_id not in self._EMBEDDING_PROVIDERS:
+            return json.dumps({"status": "error", "message": f"unknown embedding provider: {provider_id}"})
+
         local_config = conf()
         file_cfg = self._read_file_config()
+        provider_type = (data.get("embedding_provider_type") or "").strip().lower()
+        if provider_id == "custom":
+            if provider_type in ("", "openai", "openai_compatible"):
+                provider_type = "openai-compatible"
+            if provider_type != "openai-compatible":
+                return json.dumps({
+                    "status": "error",
+                    "message": "custom embedding provider only supports openai-compatible",
+                })
+            incoming_base = (data.get("embedding_api_base") or "").strip() if "embedding_api_base" in data else ""
+            existing_base = (local_config.get("embedding_api_base") or "").strip()
+            if not incoming_base and not existing_base:
+                return json.dumps({"status": "error", "message": "embedding_api_base is required for custom provider"})
+        elif provider_id == "gemini":
+            provider_type = "gemini"
+        else:
+            provider_type = ""
+
+        try:
+            dim_raw = data.get("embedding_dimensions", data.get("dimensions", None))
+            dim = int(dim_raw or 0)
+        except (TypeError, ValueError):
+            return json.dumps({"status": "error", "message": "embedding dimensions must be an integer"})
+        if dim < 0:
+            return json.dumps({"status": "error", "message": "embedding dimensions must be >= 0"})
+        if provider_id == "gemini" and dim and not (128 <= dim <= 3072):
+            return json.dumps({"status": "error", "message": "Gemini embedding dimensions must be 128-3072"})
+        if provider_id == "doubao" and dim and dim not in (1024, 2048):
+            return json.dumps({"status": "error", "message": "Doubao embedding dimensions must be 1024 or 2048"})
+
         local_config["embedding_provider"] = provider_id
         file_cfg["embedding_provider"] = provider_id
+        local_config["embedding_provider_type"] = provider_type
+        file_cfg["embedding_provider_type"] = provider_type
         local_config["embedding_model"] = model
         file_cfg["embedding_model"] = model
+        local_config["embedding_dimensions"] = dim
+        file_cfg["embedding_dimensions"] = dim
+
+        if "embedding_api_base" in data:
+            api_base = (data.get("embedding_api_base") or "").strip()
+            local_config["embedding_api_base"] = api_base
+            file_cfg["embedding_api_base"] = api_base
+
+        clear_key = bool(data.get("embedding_api_key_clear"))
+        key_present = "embedding_api_key" in data
+        if clear_key or key_present:
+            api_key = "" if clear_key else (data.get("embedding_api_key") or "").strip()
+            local_config["embedding_api_key"] = api_key
+            file_cfg["embedding_api_key"] = api_key
+
+        if "embedding_proxy" in data:
+            try:
+                proxy_value = normalize_proxy_url(data.get("embedding_proxy") or "")
+            except ValueError as proxy_err:
+                return json.dumps({"status": "error", "message": str(proxy_err)})
+            local_config["embedding_proxy"] = proxy_value
+            file_cfg["embedding_proxy"] = proxy_value
+
         self._write_file_config(file_cfg)
-        logger.info(f"[ModelsHandler] embedding updated: provider={provider_id!r} model={model!r}")
+        logger.info(
+            f"[ModelsHandler] embedding updated: provider={provider_id!r} "
+            f"type={provider_type!r} model={model!r} dim={dim!r}"
+        )
         # The next /memory rebuild-index command hot-swaps the provider onto
         # the running MemoryManager (see plugins/cow_cli). The dim may have
         # changed, so the frontend prompts the user to rebuild.
