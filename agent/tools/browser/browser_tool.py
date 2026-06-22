@@ -30,7 +30,7 @@ class BrowserTool(BaseTool):
     name: str = "browser"
     description: str = (
         "Control a browser to navigate web pages, interact with elements, and extract content. "
-        "The active backend is configured by CowAgent and may be Playwright or Camofox. "
+        "The active backend is configured by CowAgent and may be Playwright, Camofox REST, or Camoufox. "
         "Actions: navigate, snapshot, click, fill, select, scroll, screenshot, wait, back, forward, "
         "get_text, press, evaluate.\n\n"
         "Workflow: navigate (auto-includes snapshot with element refs) → click/fill/select by ref → snapshot to verify.\n\n"
@@ -63,7 +63,7 @@ class BrowserTool(BaseTool):
             },
             "ref": {
                 "anyOf": [{"type": "integer"}, {"type": "string"}],
-                "description": "Element ref from snapshot (number for Playwright, e.g. 1; string for Camofox, e.g. e1)"
+                "description": "Element ref from snapshot (number for Playwright/Camoufox, e.g. 1; string for Camofox REST, e.g. e1)"
             },
             "selector": {
                 "type": "string",

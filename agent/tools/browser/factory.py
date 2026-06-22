@@ -40,7 +40,8 @@ def create_browser_service(config: Dict[str, Any] = None):
 
     Supported engines:
       - playwright (default): local Playwright Chromium backend.
-      - camofox: camofox-browser REST API backend.
+      - camofox: @askjo/camofox-browser REST API backend.
+      - camoufox: daijro/camoufox Python Playwright-compatible backend.
       - auto: try camofox if healthy, otherwise fall back to Playwright.
     """
     config = config or {}
@@ -50,6 +51,10 @@ def create_browser_service(config: Dict[str, Any] = None):
     if engine == "camofox":
         from agent.tools.browser.camofox_service import CamofoxBrowserService
         return CamofoxBrowserService(browser_cfg)
+
+    if engine == "camoufox":
+        from agent.tools.browser.camoufox_service import CamoufoxBrowserService
+        return CamoufoxBrowserService(browser_cfg)
 
     if engine == "auto":
         try:

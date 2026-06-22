@@ -170,3 +170,33 @@ Agent 使用浏览器的典型流程：
 <Note>
   Chrome 137+ 限制 `--remote-debugging-port` 必须搭配独立 `--user-data-dir`，因此 CDP 启动的 Chrome **无法直接复用你日常 Chrome 的登录态**，需要在独立目录中重新登录一次。
 </Note>
+
+### 方式三：Camoufox 后端
+
+如需替换 Playwright Chromium 后端，可使用 daijro/camoufox 的 Python Playwright 兼容后端。安装：
+
+```bash
+cow install-browser --engine camoufox
+```
+
+配置示例：
+
+```json
+{
+  "tools": {
+    "browser": {
+      "engine": "camoufox",
+      "camoufox": {
+        "persistent": true,
+        "user_data_dir": "~/.cow/camoufox_profile",
+        "proxy": "socks5h://127.0.0.1:1080",
+        "humanize": true,
+        "geoip": false,
+        "os": ""
+      }
+    }
+  }
+}
+```
+
+`camofox` 表示已有的 Camofox REST 后端，`camoufox` 表示 Python 包后端。两者配置不同，不会互相覆盖。

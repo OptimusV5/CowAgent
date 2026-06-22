@@ -3552,6 +3552,17 @@ class BrowserConfigHandler:
                 "user_id": "cow-agent",
                 "session_key": "default",
             },
+            "camoufox": {
+                "persistent": True,
+                "user_data_dir": "~/.cow/camoufox_profile",
+                "headless": None,
+                "humanize": True,
+                "geoip": False,
+                "fingerprint_preset": False,
+                "os": "",
+                "proxy": "",
+                "idle_timeout": 300,
+            },
             "backend_proxy": "",
         }
 
@@ -3560,7 +3571,7 @@ class BrowserConfigHandler:
         base = BrowserConfigHandler._default_browser_config()
         if isinstance(cfg, dict):
             for key, value in cfg.items():
-                if key in ("playwright", "camofox") and isinstance(value, dict):
+                if key in ("playwright", "camofox", "camoufox") and isinstance(value, dict):
                     base[key].update(value)
                 else:
                     base[key] = value
@@ -3629,6 +3640,11 @@ class BrowserConfigHandler:
             camofox_cfg["access_key_masked"] = cls._mask_key(access_key)
             camofox_cfg["admin_key_masked"] = cls._mask_key(admin_key)
             camofox_cfg["admin_key_configured"] = bool(admin_key)
+        camoufox_cfg = public.get("camoufox")
+        if isinstance(camoufox_cfg, dict):
+            proxy = camoufox_cfg.pop("proxy", "") or ""
+            camoufox_cfg["proxy_masked"] = mask_proxy_url(proxy)
+            camoufox_cfg["proxy_configured"] = bool(proxy)
         return public
 
     @staticmethod
@@ -3660,6 +3676,38 @@ class BrowserConfigHandler:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _camoufox_health() -> dict:
+        try:
+            import camoufox  # noqa: F401
+        except Exception as e:
+            return {
+                "ok": False,
+                "installed": False,
+                "engine": "camoufox",
+                "error": str(e),
+                "install_hint": "python3 -m pip install -U camoufox && python3 -m camoufox fetch",
+            }
+        try:
+            from camoufox.pkgman import launch_path
+            browser_path = launch_path()
+            ok = bool(browser_path and os.path.exists(browser_path))
+            return {
+                "ok": ok,
+                "installed": True,
+                "engine": "camoufox",
+                "browser_path": browser_path,
+                **({} if ok else {"error": "Camoufox browser runtime not found", "install_hint": "python3 -m camoufox fetch"}),
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "installed": True,
+                "engine": "camoufox",
+                "error": str(e),
+                "install_hint": "python3 -m camoufox fetch",
+            }
 
     @classmethod
     def _apply_runtime_config(cls, browser_cfg: dict) -> None:
@@ -3694,6 +3742,7 @@ class BrowserConfigHandler:
                 if engine in ("camofox", "auto")
                 else {"ok": None, "engine": "playwright"}
             )
+            camoufox_health = self._camoufox_health() if engine == "camoufox" else {"ok": None, "engine": "camoufox"}
             return json.dumps({
                 "status": "success",
                 "config": public_cfg,
@@ -3702,6 +3751,8 @@ class BrowserConfigHandler:
                     "playwright_available": self._playwright_available(),
                     "camofox": public_cfg.get("camofox", {}),
                     "camofox_health": camofox_health,
+                    "camoufox": public_cfg.get("camoufox", {}),
+                    "camoufox_health": camoufox_health,
                 },
             }, ensure_ascii=False)
         except Exception as e:
@@ -3720,6 +3771,8 @@ class BrowserConfigHandler:
                 if engine == "playwright":
                     ok = self._playwright_available()
                     return json.dumps({"status": "success", "health": {"ok": ok, "engine": "playwright"}}, ensure_ascii=False)
+                if engine == "camoufox":
+                    return json.dumps({"status": "success", "health": self._camoufox_health()}, ensure_ascii=False)
                 health = self._camofox_health(cfg.get("camofox") or {}, cfg.get("backend_proxy", ""))
                 if engine == "auto" and not health.get("ok"):
                     health["fallback_playwright_available"] = self._playwright_available()
@@ -3742,11 +3795,14 @@ class BrowserConfigHandler:
                 return json.dumps({"status": "error", "message": "config must be an object"})
             cfg = self._merge_with_current(incoming)
             engine = (cfg.get("engine") or "playwright").strip().lower()
-            if engine not in ("playwright", "camofox", "auto"):
+            if engine not in ("playwright", "camofox", "camoufox", "auto"):
                 return json.dumps({"status": "error", "message": f"invalid engine: {engine}"})
             cfg["engine"] = engine
             try:
                 cfg["backend_proxy"] = normalize_proxy_url(cfg.get("backend_proxy", ""))
+                camoufox_cfg = cfg.get("camoufox")
+                if isinstance(camoufox_cfg, dict):
+                    camoufox_cfg["proxy"] = normalize_proxy_url(camoufox_cfg.get("proxy", ""))
             except ValueError as proxy_err:
                 return json.dumps({"status": "error", "message": str(proxy_err)})
 

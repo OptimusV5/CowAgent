@@ -9,7 +9,19 @@ from urllib.error import URLError, HTTPError
 
 import click
 
-from cli.utils import load_config_json, save_config_json
+from cli.utils import ensure_sys_path, load_config_json, save_config_json
+
+
+def _mask_proxy_url(value: str) -> str:
+    ensure_sys_path()
+    from common.proxy import mask_proxy_url
+    return mask_proxy_url(value)
+
+
+def _normalize_proxy_url(value: str) -> str:
+    ensure_sys_path()
+    from common.proxy import normalize_proxy_url
+    return normalize_proxy_url(value)
 
 
 def _browser_config(cfg: dict) -> dict:
@@ -29,6 +41,14 @@ def _camofox_config(browser: dict) -> dict:
     if not isinstance(node, dict):
         node = {}
     browser["camofox"] = node
+    return node
+
+
+def _camoufox_config(browser: dict) -> dict:
+    node = browser.get("camoufox")
+    if not isinstance(node, dict):
+        node = {}
+    browser["camoufox"] = node
     return node
 
 
@@ -76,17 +96,29 @@ def status():
             click.echo(f"Camofox admin key: {_mask(camofox.get('admin_key', ''))}")
         click.echo(f"Camofox managed: {bool(camofox.get('managed', False))}")
         click.echo(f"Camofox auto-start: {bool(camofox.get('auto_start', False))}")
+    camoufox = browser_cfg.get("camoufox", {}) if isinstance(browser_cfg, dict) else {}
+    if isinstance(camoufox, dict):
+        click.echo(f"Camoufox user data dir: {camoufox.get('user_data_dir', '~/.cow/camoufox_profile')}")
+        click.echo(f"Camoufox persistent: {camoufox.get('persistent', True) is not False}")
+        if camoufox.get("proxy"):
+            click.echo(f"Camoufox browser proxy: {_mask_proxy_url(camoufox.get('proxy', ''))}")
+        if camoufox.get("os"):
+            click.echo(f"Camoufox target OS: {camoufox.get('os')}")
 
 
 @browser.command()
-@click.argument("engine", type=click.Choice(["playwright", "camofox", "auto"], case_sensitive=False))
+@click.argument("engine", type=click.Choice(["playwright", "camofox", "camoufox", "auto"], case_sensitive=False))
 @click.option("--base-url", default="", help="Camofox server URL.")
 @click.option("--access-key", default="", help="Camofox access key.")
 @click.option("--admin-key", default="", help="Camofox admin key for POST /stop.")
 @click.option("--managed/--external", default=None, help="Whether CowAgent manages the Camofox process.")
 @click.option("--auto-start/--no-auto-start", default=None, help="Whether CowAgent auto-starts managed Camofox.")
 @click.option("--port", type=int, default=None, help="Managed Camofox port.")
-def switch(engine, base_url, access_key, admin_key, managed, auto_start, port):
+@click.option("--user-data-dir", default="", help="Camoufox persistent profile directory.")
+@click.option("--browser-proxy", default="", help="Camoufox browser traffic proxy.")
+@click.option("--target-os", type=click.Choice(["", "windows", "macos", "linux"], case_sensitive=False), default="", help="Camoufox fingerprint target OS.")
+@click.option("--persistent/--fresh", default=None, help="Whether Camoufox uses a persistent profile.")
+def switch(engine, base_url, access_key, admin_key, managed, auto_start, port, user_data_dir, browser_proxy, target_os, persistent):
     """Switch browser backend."""
     engine = engine.lower()
     cfg = load_config_json()
@@ -110,6 +142,19 @@ def switch(engine, base_url, access_key, admin_key, managed, auto_start, port):
         if port is not None:
             camofox["port"] = port
 
+    if engine == "camoufox":
+        camoufox = _camoufox_config(browser_cfg)
+        if user_data_dir:
+            camoufox["user_data_dir"] = user_data_dir
+        elif "user_data_dir" not in camoufox:
+            camoufox["user_data_dir"] = "~/.cow/camoufox_profile"
+        if browser_proxy:
+            camoufox["proxy"] = _normalize_proxy_url(browser_proxy)
+        if target_os:
+            camoufox["os"] = target_os.lower()
+        if persistent is not None:
+            camoufox["persistent"] = bool(persistent)
+
     save_config_json(cfg)
     click.echo(f"Browser engine set to: {engine}")
     click.echo("Restart CowAgent for CLI changes to affect a running process, or switch from the Web console for hot apply.")
@@ -130,6 +175,25 @@ def doctor():
             click.echo(f"Camofox health: ok ({base_url})")
         else:
             click.echo(f"Camofox health: failed ({base_url}) - {result.get('error') or result.get('status')}")
+    elif engine == "camoufox":
+        try:
+            import camoufox  # noqa: F401
+            click.echo("Camoufox package: installed")
+        except Exception as e:
+            click.echo(f"Camoufox package: missing ({e})")
+            click.echo("Install with: cow install-browser --engine camoufox")
+            return
+        try:
+            from camoufox.pkgman import launch_path
+            browser_path = launch_path()
+            if browser_path and os.path.exists(browser_path):
+                click.echo(f"Camoufox browser runtime: installed ({browser_path})")
+            else:
+                click.echo("Camoufox browser runtime: missing")
+                click.echo("Fetch with: python3 -m camoufox fetch")
+        except Exception as e:
+            click.echo(f"Camoufox browser runtime: missing ({e})")
+            click.echo("Fetch with: python3 -m camoufox fetch")
     else:
         try:
             import playwright  # noqa: F401

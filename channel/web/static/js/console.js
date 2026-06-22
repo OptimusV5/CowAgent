@@ -147,6 +147,7 @@ const I18N = {
         config_browser_failed: '连接失败',
         config_browser_backend_proxy: '浏览器后端代理',
         config_browser_backend_proxy_hint: '用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。',
+        config_browser_camoufox_auto_os: '自动',
         config_video_parse: '视频解析工具',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
@@ -422,6 +423,7 @@ const I18N = {
         config_browser_failed: 'Connection failed',
         config_browser_backend_proxy: 'Browser Backend Proxy',
         config_browser_backend_proxy_hint: 'Used only for CowAgent connecting to the Camofox REST API. It does not affect browser page traffic.',
+        config_browser_camoufox_auto_os: 'Auto',
         config_video_parse: 'Video Parse Tool',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
@@ -4609,13 +4611,18 @@ function initSecretInput(input, maskedValue) {
 function updateBrowserBackendVisibility(engine) {
     const value = (engine || getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
     const camofoxEl = document.getElementById('cfg-browser-camofox');
+    const camoufoxEl = document.getElementById('cfg-browser-camoufox');
     const playwrightEl = document.getElementById('cfg-browser-playwright');
-    if (camofoxEl) camofoxEl.classList.toggle('hidden', value === 'playwright');
-    if (playwrightEl) playwrightEl.classList.toggle('hidden', value === 'camofox');
+    const backendProxyWrap = document.getElementById('cfg-browser-backend-proxy-wrap');
+    const isRest = value === 'camofox' || value === 'auto';
+    if (camofoxEl) camofoxEl.classList.toggle('hidden', !isRest);
+    if (camoufoxEl) camoufoxEl.classList.toggle('hidden', value !== 'camoufox');
+    if (playwrightEl) playwrightEl.classList.toggle('hidden', value !== 'playwright');
+    if (backendProxyWrap) backendProxyWrap.classList.toggle('hidden', !isRest);
     const startEl = document.getElementById('cfg-browser-start');
     const stopEl = document.getElementById('cfg-browser-stop');
-    if (startEl) startEl.classList.toggle('hidden', value === 'playwright');
-    if (stopEl) stopEl.classList.toggle('hidden', value === 'playwright');
+    if (startEl) startEl.classList.toggle('hidden', !isRest);
+    if (stopEl) stopEl.classList.toggle('hidden', !isRest);
 }
 
 function initBrowserConfigView(data) {
@@ -4626,20 +4633,29 @@ function initBrowserConfigView(data) {
 
     initDropdown(engineEl, [
         { value: 'playwright', label: 'Playwright' },
-        { value: 'camofox', label: 'Camofox' },
+        { value: 'camofox', label: 'Camofox REST' },
+        { value: 'camoufox', label: 'Camoufox' },
         { value: 'auto', label: currentLang === 'zh' ? '自动' : 'Auto' },
     ], engine, updateBrowserBackendVisibility);
     updateBrowserBackendVisibility(engine);
 
     const camofox = cfg.camofox || {};
+    const camoufox = cfg.camoufox || {};
     const playwright = cfg.playwright || {};
     const health = (data && data.public && data.public.camofox_health) || {};
+    const camoufoxHealth = (data && data.public && data.public.camoufox_health) || {};
     const healthEl = document.getElementById('cfg-browser-health');
     if (healthEl) {
         if (engine === 'camofox' || engine === 'auto') {
             healthEl.textContent = health.ok ? t('config_browser_ok') : t('config_browser_failed');
             healthEl.classList.toggle('text-primary-500', !!health.ok);
             healthEl.classList.toggle('text-red-500', !health.ok);
+            healthEl.classList.toggle('text-slate-400', false);
+            healthEl.classList.toggle('dark:text-slate-500', false);
+        } else if (engine === 'camoufox') {
+            healthEl.textContent = camoufoxHealth.ok ? t('config_browser_ok') : t('config_browser_failed');
+            healthEl.classList.toggle('text-primary-500', !!camoufoxHealth.ok);
+            healthEl.classList.toggle('text-red-500', !camoufoxHealth.ok);
             healthEl.classList.toggle('text-slate-400', false);
             healthEl.classList.toggle('dark:text-slate-500', false);
         } else {
@@ -4661,6 +4677,27 @@ function initBrowserConfigView(data) {
     if (autoStartEl) autoStartEl.checked = camofox.auto_start === true;
     initSecretInput(document.getElementById('cfg-browser-backend-proxy'), cfg.backend_proxy_masked || '');
 
+    const camoufoxUserDataEl = document.getElementById('cfg-camoufox-user-data');
+    if (camoufoxUserDataEl) camoufoxUserDataEl.value = camoufox.user_data_dir || '~/.cow/camoufox_profile';
+    initSecretInput(document.getElementById('cfg-camoufox-proxy'), camoufox.proxy_masked || '');
+    const osEl = document.getElementById('cfg-camoufox-os');
+    if (osEl) {
+        initDropdown(osEl, [
+            { value: '', label: t('config_browser_camoufox_auto_os') },
+            { value: 'windows', label: 'Windows' },
+            { value: 'macos', label: 'macOS' },
+            { value: 'linux', label: 'Linux' },
+        ], camoufox.os || '', null);
+    }
+    const persistentEl = document.getElementById('cfg-camoufox-persistent');
+    if (persistentEl) persistentEl.checked = camoufox.persistent !== false;
+    const humanizeEl = document.getElementById('cfg-camoufox-humanize');
+    if (humanizeEl) humanizeEl.checked = camoufox.humanize !== false;
+    const geoipEl = document.getElementById('cfg-camoufox-geoip');
+    if (geoipEl) geoipEl.checked = camoufox.geoip === true;
+    const presetEl = document.getElementById('cfg-camoufox-fingerprint-preset');
+    if (presetEl) presetEl.checked = camoufox.fingerprint_preset === true;
+
     const cdpEl = document.getElementById('cfg-playwright-cdp');
     if (cdpEl) cdpEl.value = playwright.cdp_endpoint || '';
     const userDataEl = document.getElementById('cfg-playwright-user-data');
@@ -4681,6 +4718,14 @@ function collectBrowserConfigPayload() {
             managed: document.getElementById('cfg-camofox-managed')?.checked === true,
             auto_start: document.getElementById('cfg-camofox-auto-start')?.checked === true,
         },
+        camoufox: {
+            persistent: document.getElementById('cfg-camoufox-persistent')?.checked !== false,
+            user_data_dir: document.getElementById('cfg-camoufox-user-data')?.value.trim() || '~/.cow/camoufox_profile',
+            humanize: document.getElementById('cfg-camoufox-humanize')?.checked !== false,
+            geoip: document.getElementById('cfg-camoufox-geoip')?.checked === true,
+            fingerprint_preset: document.getElementById('cfg-camoufox-fingerprint-preset')?.checked === true,
+            os: getDropdownValue(document.getElementById('cfg-camoufox-os')) || '',
+        },
     };
     const backendProxyEl = document.getElementById('cfg-browser-backend-proxy');
     if (backendProxyEl && backendProxyEl.dataset.masked !== '1') {
@@ -4693,6 +4738,10 @@ function collectBrowserConfigPayload() {
     const adminKeyEl = document.getElementById('cfg-camofox-admin-key');
     if (adminKeyEl && adminKeyEl.dataset.masked !== '1') {
         payload.camofox.admin_key = adminKeyEl.value.trim();
+    }
+    const camoufoxProxyEl = document.getElementById('cfg-camoufox-proxy');
+    if (camoufoxProxyEl && camoufoxProxyEl.dataset.masked !== '1') {
+        payload.camoufox.proxy = camoufoxProxyEl.value.trim();
     }
     return payload;
 }

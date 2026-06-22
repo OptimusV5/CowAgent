@@ -110,11 +110,16 @@ def run_install_browser(
         return run_install_playwright_browser(stream=stream, on_phase=on_phase)
     if engine == "camofox":
         return run_install_camofox_browser(stream=stream, on_phase=on_phase)
+    if engine == "camoufox":
+        return run_install_camoufox_browser(stream=stream, on_phase=on_phase)
     if engine == "all":
         ret = run_install_playwright_browser(stream=stream, on_phase=on_phase)
         if ret != 0:
             return ret
-        return run_install_camofox_browser(stream=stream, on_phase=on_phase)
+        ret = run_install_camofox_browser(stream=stream, on_phase=on_phase)
+        if ret != 0:
+            return ret
+        return run_install_camoufox_browser(stream=stream, on_phase=on_phase)
     stream = stream or _default_stream
     stream(f"Unknown browser engine: {engine}", "red")
     return 1
@@ -407,10 +412,65 @@ def run_install_camofox_browser(
     return 0
 
 
+def run_install_camoufox_browser(
+    stream: Optional[StreamFn] = None,
+    on_phase: Optional[PhaseFn] = None,
+) -> int:
+    """Install daijro/camoufox Python package and fetch its browser runtime."""
+    from cli.utils import get_cli_language
+
+    get_cli_language()
+    from common import i18n
+    _t = i18n.t
+
+    stream = stream or _default_stream
+    python = sys.executable
+
+    _phase(on_phase, _t(
+        "🦊 开始安装 Camoufox Python 浏览器后端…",
+        "🦊 Installing Camoufox Python browser backend…",
+    ))
+
+    stream("[1/2] Installing camoufox Python package...", "yellow")
+    ret = _pip_install("camoufox", stream)
+    if ret != 0:
+        stream("Failed to install camoufox package.", "red")
+        _phase(on_phase, _t("❌ Camoufox Python 包安装失败。", "❌ Failed to install Camoufox Python package."))
+        return 1
+
+    _phase(on_phase, _t(
+        "🌐 [2/2] 正在下载 Camoufox 浏览器内核…",
+        "🌐 [2/2] Downloading Camoufox browser runtime…",
+    ))
+    stream("[2/2] Fetching Camoufox browser runtime...", "yellow")
+    ret = subprocess.call([python, "-m", "camoufox", "fetch"])
+    if ret != 0:
+        stream("Failed to fetch Camoufox browser runtime.", "red")
+        stream("Run manually: python3 -m camoufox fetch", "yellow")
+        return 1
+
+    ret = subprocess.call(
+        [python, "-c", "from camoufox.sync_api import Camoufox; print('OK')"],
+        stderr=subprocess.DEVNULL,
+    )
+    if ret != 0:
+        stream("  Warning: Camoufox import verification failed.", "yellow")
+    else:
+        stream("  Verification passed.", "green")
+
+    _phase(on_phase, _t(
+        "✅ Camoufox Python 浏览器后端已安装。",
+        "✅ Camoufox Python browser backend installed.",
+    ))
+    stream("")
+    stream("Camoufox backend ready. Use `cow browser switch camoufox` to enable it.", "green")
+    return 0
+
+
 @click.command("install-browser")
 @click.option(
     "--engine",
-    type=click.Choice(["playwright", "camofox", "all"], case_sensitive=False),
+    type=click.Choice(["playwright", "camofox", "camoufox", "all"], case_sensitive=False),
     default="playwright",
     show_default=True,
     help="Browser backend to install.",

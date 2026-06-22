@@ -170,3 +170,33 @@ Then point the Agent at the endpoint in `config.json`:
 <Note>
   Chrome 137+ requires `--remote-debugging-port` to be paired with a dedicated `--user-data-dir`. As a result, the CDP-launched Chrome **cannot directly reuse the login state of your daily Chrome**; you'll need to log in once inside this dedicated profile.
 </Note>
+
+### Option 3: Camoufox backend
+
+To replace the Playwright Chromium backend, use the daijro/camoufox Python Playwright-compatible backend. Install it with:
+
+```bash
+cow install-browser --engine camoufox
+```
+
+Example config:
+
+```json
+{
+  "tools": {
+    "browser": {
+      "engine": "camoufox",
+      "camoufox": {
+        "persistent": true,
+        "user_data_dir": "~/.cow/camoufox_profile",
+        "proxy": "socks5h://127.0.0.1:1080",
+        "humanize": true,
+        "geoip": false,
+        "os": ""
+      }
+    }
+  }
+}
+```
+
+`camofox` is the existing Camofox REST backend, while `camoufox` is the Python package backend. Their configs are separate.

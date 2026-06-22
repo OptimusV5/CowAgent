@@ -672,7 +672,7 @@
                                         </div>
                                         <div id="cfg-browser-camofox" class="space-y-4 hidden">
                                             <div>
-                                                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">Camofox Base URL</label>
+                                                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">Camofox REST Base URL</label>
                                                 <input id="cfg-camofox-base-url" type="text"
                                                        class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
                                                               bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
@@ -723,7 +723,7 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <div>
+                                        <div id="cfg-browser-backend-proxy-wrap">
                                             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_browser_backend_proxy">浏览器后端代理</label>
                                             <input id="cfg-browser-backend-proxy" type="text" autocomplete="off" spellcheck="false"
                                                    class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
@@ -731,6 +731,75 @@
                                                           focus:outline-none focus:border-primary-500 font-mono transition-colors"
                                                    placeholder="socks5h://127.0.0.1:1080">
                                             <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_backend_proxy_hint">用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。</p>
+                                        </div>
+                                        <div id="cfg-browser-camoufox" class="space-y-4 hidden">
+                                            <div class="grid sm:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">User Data Dir</label>
+                                                    <input id="cfg-camoufox-user-data" type="text"
+                                                           class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                  focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                           placeholder="~/.cow/camoufox_profile">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">Browser Proxy</label>
+                                                    <input id="cfg-camoufox-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                           class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                  focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                           placeholder="socks5h://127.0.0.1:1080">
+                                                    <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500">用于 Camoufox 浏览器页面访问外网。</p>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">Target OS</label>
+                                                <div id="cfg-camoufox-os" class="cfg-dropdown" tabindex="0">
+                                                    <div class="cfg-dropdown-selected">
+                                                        <span class="cfg-dropdown-text">--</span>
+                                                        <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                                                    </div>
+                                                    <div class="cfg-dropdown-menu"></div>
+                                                </div>
+                                            </div>
+                                            <div class="grid sm:grid-cols-4 gap-4">
+                                                <div class="flex items-center justify-between sm:justify-start sm:gap-3">
+                                                    <span class="text-sm font-medium text-slate-600 dark:text-slate-400">Persistent</span>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input id="cfg-camoufox-persistent" type="checkbox" class="sr-only peer">
+                                                        <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                    after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                    </label>
+                                                </div>
+                                                <div class="flex items-center justify-between sm:justify-start sm:gap-3">
+                                                    <span class="text-sm font-medium text-slate-600 dark:text-slate-400">Humanize</span>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input id="cfg-camoufox-humanize" type="checkbox" class="sr-only peer">
+                                                        <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                    after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                    </label>
+                                                </div>
+                                                <div class="flex items-center justify-between sm:justify-start sm:gap-3">
+                                                    <span class="text-sm font-medium text-slate-600 dark:text-slate-400">GeoIP</span>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input id="cfg-camoufox-geoip" type="checkbox" class="sr-only peer">
+                                                        <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                    after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                    </label>
+                                                </div>
+                                                <div class="flex items-center justify-between sm:justify-start sm:gap-3">
+                                                    <span class="text-sm font-medium text-slate-600 dark:text-slate-400">Preset</span>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input id="cfg-camoufox-fingerprint-preset" type="checkbox" class="sr-only peer">
+                                                        <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                    after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                    after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                    </label>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div id="cfg-browser-playwright" class="space-y-4">
                                             <div>
