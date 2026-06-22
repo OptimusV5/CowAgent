@@ -6,6 +6,7 @@ and shutdown differ from the default Chromium Playwright backend.
 """
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
@@ -20,11 +21,32 @@ _DEFAULT_INSTALL_HINT = (
     "Install Camoufox with: python3 -m pip install -U camoufox && "
     "python3 -m camoufox fetch"
 )
+_UNEXPECTED_KWARG_RE = re.compile(r"unexpected keyword argument ['\"]([^'\"]+)['\"]")
+_OPTIONAL_CAMOUFOX_OPTIONS = {
+    "fingerprint_preset",
+    "humanize",
+    "geoip",
+    "block_images",
+    "block_webrtc",
+    "disable_coop",
+    "main_world_eval",
+    "enable_cache",
+}
 
 
 def _compact_dict(data: Dict[str, Any]) -> Dict[str, Any]:
     """Drop empty values so Camoufox can apply its own defaults."""
     return {k: v for k, v in data.items() if v is not None and v != "" and v != [] and v != {}}
+
+
+def _enabled(value: Any) -> bool:
+    """Return whether an optional Camoufox-only feature was explicitly enabled."""
+    return value not in (None, False, "", [], {})
+
+
+def _unexpected_kwarg(err: Exception) -> str:
+    match = _UNEXPECTED_KWARG_RE.search(str(err))
+    return match.group(1) if match else ""
 
 
 def _parse_proxy(value: str) -> Optional[Dict[str, str]]:
@@ -88,10 +110,8 @@ class CamoufoxBrowserService(BrowserService):
             logger.info(f"[Browser] Launching Camoufox (fresh, headless={self._headless})")
 
         try:
-            self._camoufox_ctx = Camoufox(**options)
-            launched = self._camoufox_ctx.__enter__()
+            launched = self._launch_camoufox_context(Camoufox, options)
         except Exception as e:
-            self._camoufox_ctx = None
             msg = str(e).lower()
             if "not found" in msg or "no such file" in msg or "browser version" in msg or "fetch" in msg:
                 raise RuntimeError(f"Camoufox browser runtime is not ready. {_DEFAULT_INSTALL_HINT}. Original error: {e}") from e
@@ -116,6 +136,38 @@ class CamoufoxBrowserService(BrowserService):
 
         self._wire_close_listeners()
         logger.info("[Browser] Camoufox ready")
+
+    def _launch_camoufox_context(self, Camoufox, options: Dict[str, Any]):
+        """Enter Camoufox, dropping unsupported optional kwargs for older versions."""
+        launch_options = dict(options)
+        dropped = []
+        while True:
+            ctx = Camoufox(**launch_options)
+            try:
+                launched = ctx.__enter__()
+                self._camoufox_ctx = ctx
+                if dropped:
+                    logger.warning(
+                        "[Browser] Camoufox launched without unsupported options: "
+                        + ", ".join(dropped)
+                    )
+                return launched
+            except Exception as e:
+                try:
+                    ctx.__exit__(type(e), e, e.__traceback__)
+                except Exception:
+                    pass
+                self._camoufox_ctx = None
+                key = _unexpected_kwarg(e)
+                if key and key in launch_options and key in _OPTIONAL_CAMOUFOX_OPTIONS:
+                    launch_options.pop(key, None)
+                    dropped.append(key)
+                    logger.warning(
+                        f"[Browser] Installed Camoufox does not support option '{key}'; "
+                        "retrying without it. Upgrade Camoufox to use this option."
+                    )
+                    continue
+                raise
 
     def _build_camoufox_options(self, launch_args: List[str], viewport: Dict[str, int]) -> Dict[str, Any]:
         persistent = self._launch_mode == "persistent"
@@ -147,18 +199,19 @@ class CamoufoxBrowserService(BrowserService):
             "args": launch_args,
             "window": tuple(window),
             "os": os_choice,
-            "humanize": self._config.get("humanize", True),
-            "geoip": self._config.get("geoip", False),
-            "fingerprint_preset": self._config.get("fingerprint_preset", False),
-            "block_images": self._config.get("block_images", None),
-            "block_webrtc": self._config.get("block_webrtc", None),
-            "disable_coop": self._config.get("disable_coop", None),
-            "main_world_eval": self._config.get("main_world_eval", None),
-            "enable_cache": self._config.get("enable_cache", None),
             "config": raw_config,
             "firefox_user_prefs": firefox_user_prefs,
             "proxy": proxy,
         }
+        for key in ("block_images", "block_webrtc", "disable_coop", "main_world_eval", "enable_cache"):
+            if _enabled(self._config.get(key)):
+                options[key] = self._config.get(key)
+        if _enabled(self._config.get("humanize", True)):
+            options["humanize"] = self._config.get("humanize", True)
+        if _enabled(self._config.get("geoip", False)):
+            options["geoip"] = self._config.get("geoip")
+        if _enabled(self._config.get("fingerprint_preset", False)):
+            options["fingerprint_preset"] = self._config.get("fingerprint_preset")
         executable_path = str(self._config.get("executable_path") or "").strip()
         if executable_path:
             options["executable_path"] = expand_path(executable_path)
