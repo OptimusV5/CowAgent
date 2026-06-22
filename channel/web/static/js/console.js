@@ -173,6 +173,8 @@ const I18N = {
         config_video_processing_timeout: '处理超时',
         config_video_max_mb: '最大视频大小 MB',
         config_video_temp_dir: '临时目录',
+        config_video_split_threshold: '分段阈值秒',
+        config_video_max_segments: '最大分段数',
         config_video_keep_temp: '保留临时文件',
         config_video_delete_source: '成功后删除本地视频',
         config_video_delete_remote: '成功后删除远端文件',
@@ -449,6 +451,8 @@ const I18N = {
         config_video_processing_timeout: 'Processing timeout',
         config_video_max_mb: 'Max video size MB',
         config_video_temp_dir: 'Temp directory',
+        config_video_split_threshold: 'Split threshold seconds',
+        config_video_max_segments: 'Max segments',
         config_video_keep_temp: 'Keep temp files',
         config_video_delete_source: 'Delete local video after success',
         config_video_delete_remote: 'Delete remote file after success',
@@ -4996,6 +5000,8 @@ function initVideoParseConfigView(data) {
     setValue('cfg-video-processing-timeout', cfg.processing_timeout || 300);
     setValue('cfg-video-max-mb', Math.max(1, Math.round((cfg.max_video_bytes || 2147483648) / 1024 / 1024)));
     setValue('cfg-video-temp-dir', cfg.temp_dir || '');
+    setValue('cfg-video-split-threshold', cfg.split_duration_threshold_sec == null ? 0 : cfg.split_duration_threshold_sec);
+    setValue('cfg-video-max-segments', cfg.max_segments == null ? 20 : cfg.max_segments);
     setChecked('cfg-video-keep-temp', cfg.keep_temp === true);
     setChecked('cfg-video-delete-source', cfg.delete_source_on_success !== false);
     setChecked('cfg-video-delete-remote', cfg.delete_remote_file !== false);
@@ -5005,7 +5011,12 @@ function initVideoParseConfigView(data) {
 
 function collectVideoParseConfigPayload() {
     const getValue = (id) => document.getElementById(id)?.value.trim() || '';
-    const getInt = (id, fallback) => parseInt(document.getElementById(id)?.value || fallback, 10) || fallback;
+    const getInt = (id, fallback) => {
+        const raw = document.getElementById(id)?.value;
+        if (raw == null || raw === '') return fallback;
+        const parsed = parseInt(raw, 10);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    };
     const maxMb = getInt('cfg-video-max-mb', 2048);
     const payload = {
         api_base: getValue('cfg-video-api-base') || 'https://generativelanguage.googleapis.com',
@@ -5016,6 +5027,8 @@ function collectVideoParseConfigPayload() {
         ffmpeg_timeout: getInt('cfg-video-ffmpeg-timeout', 300),
         gemini_timeout: getInt('cfg-video-gemini-timeout', 600),
         processing_timeout: getInt('cfg-video-processing-timeout', 300),
+        split_duration_threshold_sec: Math.max(0, getInt('cfg-video-split-threshold', 0)),
+        max_segments: Math.max(0, getInt('cfg-video-max-segments', 20)),
         max_video_bytes: Math.max(1, maxMb) * 1024 * 1024,
         temp_dir: getValue('cfg-video-temp-dir'),
         keep_temp: document.getElementById('cfg-video-keep-temp')?.checked === true,

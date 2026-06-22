@@ -1,4 +1,5 @@
 import json
+import math
 import mimetypes
 import os
 import re
@@ -34,6 +35,8 @@ DEFAULT_DOWNLOAD_TIMEOUT = 600
 DEFAULT_FFMPEG_TIMEOUT = 300
 DEFAULT_GEMINI_TIMEOUT = 600
 DEFAULT_PROCESSING_TIMEOUT = 300
+DEFAULT_SPLIT_DURATION_THRESHOLD = 0
+DEFAULT_MAX_SEGMENTS = 20
 MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024
 
 SUPPORTED_VIDEO_MIME_TYPES = {
@@ -116,7 +119,7 @@ class VideoParseTool(BaseTool):
             },
             "model": {
                 "type": "string",
-                "description": "Optional Gemini model name. Defaults to gemini-2.5-flash.",
+                "description": "Optional Gemini model name. Web video_parse config takes precedence when set.",
             },
             "keep_temp": {
                 "type": "boolean",
@@ -135,7 +138,7 @@ class VideoParseTool(BaseTool):
         runtime = self._runtime_config(args)
         work_dir = None
         local_source_path = None
-        file_name = None
+        remote_file_names: List[str] = []
         success = False
 
         try:
@@ -165,7 +168,8 @@ class VideoParseTool(BaseTool):
                 runtime["ffmpeg_timeout"],
             )
 
-            self._validate_video_size(final_path, runtime["max_video_bytes"])
+            if os.path.getsize(final_path) <= 0:
+                raise VideoParseError("Video file is empty")
             mime_type = self._detect_mime_type(final_path)
             if mime_type not in SUPPORTED_VIDEO_MIME_TYPES:
                 supported = ", ".join(sorted(SUPPORTED_VIDEO_MIME_TYPES))
@@ -174,39 +178,24 @@ class VideoParseTool(BaseTool):
                 )
             final_path = self._ensure_ascii_upload_path(final_path, work_dir)
 
-            self.report_progress("正在上传视频到 Gemini Files API...")
-            file_info = self._upload_file(final_path, mime_type, runtime)
-            file_uri = self._file_field(file_info, "uri")
-            file_name = self._file_field(file_info, "name")
-            if not file_uri:
-                raise VideoParseError("Gemini Files API did not return file.uri")
-
-            if file_name:
-                self.report_progress("正在等待 Gemini 完成视频处理...")
-                file_info = self._wait_for_file_active(file_name, runtime)
-                file_uri = self._file_field(file_info, "uri") or file_uri
-
-            self.report_progress("正在调用 Gemini 解析视频...")
-            response_data = self._generate_content_when_ready(file_name, file_uri, mime_type, runtime)
-            raw_text = self._extract_candidate_text(response_data)
-            parsed = self._parse_json_text(raw_text)
-            usage = response_data.get("usageMetadata") or {}
-
-            result = parsed if isinstance(parsed, dict) else {}
-            result.setdefault("raw_text", raw_text)
-            result["_meta"] = {
+            result = self._analyze_video_or_segments(
+                final_path=final_path,
+                mime_type=mime_type,
+                work_dir=work_dir,
+                runtime=runtime,
+                remote_file_names=remote_file_names,
+            )
+            meta = result.setdefault("_meta", {})
+            meta.update({
                 "model": runtime["model"],
                 "mime_type": mime_type,
                 "merge_performed": merge_performed,
                 "temp_files_deleted": not runtime["keep_temp"],
                 "source_file_deleted": bool(local_source_path and runtime["delete_source_on_success"]),
-                "remote_file_deleted": bool(file_name and runtime["delete_remote_file"]),
-                "usage": usage,
-            }
+                "remote_file_deleted": bool(remote_file_names and runtime["delete_remote_file"]),
+            })
             if runtime["keep_temp"]:
-                result["_meta"]["temp_dir"] = work_dir
-            if not runtime["delete_remote_file"]:
-                result["_meta"]["file_uri"] = file_uri
+                meta["temp_dir"] = work_dir
             success = True
             return ToolResult.success(result)
 
@@ -227,11 +216,14 @@ class VideoParseTool(BaseTool):
                 self._cleanup_after_success(
                     work_dir=work_dir,
                     local_source_path=local_source_path,
-                    file_name=file_name,
+                    file_names=remote_file_names,
                     runtime=runtime,
                 )
-            elif work_dir and not runtime.get("keep_temp"):
-                self._remove_dir(work_dir)
+            else:
+                if runtime.get("delete_remote_file"):
+                    self._delete_remote_files(remote_file_names, runtime)
+                if work_dir and not runtime.get("keep_temp"):
+                    self._remove_dir(work_dir)
 
     def _runtime_config(self, args: Dict[str, Any]) -> Dict[str, Any]:
         cfg = self._latest_tool_config()
@@ -243,8 +235,8 @@ class VideoParseTool(BaseTool):
         )
         upload_api_base = cfg.get("upload_api_base") or api_base
         model = (
-            args.get("model")
-            or cfg.get("model")
+            cfg.get("model")
+            or args.get("model")
             or os.environ.get("GEMINI_VIDEO_MODEL")
             or DEFAULT_MODEL
         )
@@ -262,6 +254,11 @@ class VideoParseTool(BaseTool):
             "ffmpeg_timeout": self._int_value(cfg.get("ffmpeg_timeout"), DEFAULT_FFMPEG_TIMEOUT),
             "gemini_timeout": self._int_value(cfg.get("gemini_timeout"), DEFAULT_GEMINI_TIMEOUT),
             "processing_timeout": self._int_value(cfg.get("processing_timeout"), DEFAULT_PROCESSING_TIMEOUT),
+            "split_duration_threshold_sec": max(
+                0,
+                self._int_value(cfg.get("split_duration_threshold_sec"), DEFAULT_SPLIT_DURATION_THRESHOLD),
+            ),
+            "max_segments": max(0, self._int_value(cfg.get("max_segments"), DEFAULT_MAX_SEGMENTS)),
             "max_video_bytes": self._int_value(cfg.get("max_video_bytes"), MAX_VIDEO_BYTES),
             "temp_dir": cfg.get("temp_dir") or "",
             "keep_temp": bool(keep_temp),
@@ -606,6 +603,302 @@ class VideoParseTool(BaseTool):
         logger.info(f"[VideoParse] Copied upload file to ASCII path: {ascii_path}")
         return ascii_path
 
+    def _analyze_video_or_segments(
+        self,
+        final_path: str,
+        mime_type: str,
+        work_dir: str,
+        runtime: Dict[str, Any],
+        remote_file_names: List[str],
+    ) -> Dict[str, Any]:
+        duration_sec = self._probe_duration(final_path)
+        split_threshold = runtime.get("split_duration_threshold_sec", 0)
+        if not split_threshold or not duration_sec or duration_sec <= split_threshold:
+            if split_threshold and not duration_sec:
+                logger.warning("[VideoParse] Unable to detect video duration; falling back to single-file analysis")
+            analysis = self._analyze_single_video(
+                final_path,
+                mime_type,
+                runtime,
+                remote_file_names,
+                progress_prefix="视频",
+            )
+            result = analysis["parsed"] if isinstance(analysis["parsed"], dict) else {}
+            result.setdefault("raw_text", analysis["raw_text"])
+            result["_meta"] = {
+                "mode": "single",
+                "duration_sec": duration_sec,
+                "split_duration_threshold_sec": split_threshold,
+                "usage": analysis["usage"],
+            }
+            if not runtime["delete_remote_file"] and analysis.get("file_uri"):
+                result["_meta"]["file_uri"] = analysis["file_uri"]
+            return result
+
+        max_segments = runtime.get("max_segments", DEFAULT_MAX_SEGMENTS)
+        estimated_segments = int(math.ceil(duration_sec / split_threshold))
+        if max_segments and estimated_segments > max_segments:
+            raise VideoParseError(
+                "Video duration {}s exceeds split limit: estimated {} segments > max_segments {}. "
+                "Increase split_duration_threshold_sec or max_segments.".format(
+                    round(duration_sec, 2),
+                    estimated_segments,
+                    max_segments,
+                )
+            )
+
+        self.report_progress("视频超过阈值，正在无损切分...")
+        segments = self._split_video(
+            final_path,
+            work_dir,
+            split_threshold,
+            runtime["ffmpeg_timeout"],
+            runtime["max_video_bytes"],
+        )
+        if max_segments and len(segments) > max_segments:
+            raise VideoParseError(
+                f"Video split produced {len(segments)} segments, which exceeds max_segments {max_segments}"
+            )
+
+        segment_results = []
+        usage_total = {
+            "promptTokenCount": 0,
+            "candidatesTokenCount": 0,
+            "totalTokenCount": 0,
+        }
+        for segment in segments:
+            index = segment["index"]
+            prompt = self._segment_prompt(
+                runtime["prompt"],
+                index,
+                len(segments),
+                segment.get("start_sec"),
+                segment.get("end_sec"),
+            )
+            analysis = self._analyze_single_video(
+                segment["path"],
+                segment["mime_type"],
+                runtime,
+                remote_file_names,
+                prompt=prompt,
+                progress_prefix=f"第 {index}/{len(segments)} 段视频",
+            )
+            usage = analysis["usage"]
+            for key in usage_total:
+                usage_total[key] += self._int_value(usage.get(key), 0)
+            segment_result = {
+                "index": index,
+                "start_sec": segment.get("start_sec"),
+                "end_sec": segment.get("end_sec"),
+                "duration_sec": segment.get("duration_sec"),
+                "mime_type": segment["mime_type"],
+                "raw_text": analysis["raw_text"],
+                "parsed": analysis["parsed"] if analysis["parsed"] is not None else {},
+                "usage": usage,
+            }
+            if runtime["keep_temp"]:
+                segment_result["path"] = segment["path"]
+            if not runtime["delete_remote_file"] and analysis.get("file_uri"):
+                segment_result["file_uri"] = analysis["file_uri"]
+            segment_results.append(segment_result)
+
+        return {
+            "mode": "segmented",
+            "segments": segment_results,
+            "_meta": {
+                "mode": "segmented",
+                "duration_sec": duration_sec,
+                "split_duration_threshold_sec": split_threshold,
+                "segment_count": len(segment_results),
+                "max_segments": max_segments,
+                "usage_total": usage_total,
+            },
+        }
+
+    def _analyze_single_video(
+        self,
+        path: str,
+        mime_type: str,
+        runtime: Dict[str, Any],
+        remote_file_names: List[str],
+        prompt: Optional[str] = None,
+        progress_prefix: str = "视频",
+    ) -> Dict[str, Any]:
+        self._validate_video_size(path, runtime["max_video_bytes"])
+        self.report_progress(f"正在上传{progress_prefix}到 Gemini Files API...")
+        file_info = self._upload_file(path, mime_type, runtime)
+        file_uri = self._file_field(file_info, "uri")
+        file_name = self._file_field(file_info, "name")
+        if file_name:
+            remote_file_names.append(file_name)
+        if not file_uri:
+            raise VideoParseError("Gemini Files API did not return file.uri")
+
+        if file_name:
+            self.report_progress(f"正在等待 Gemini 完成{progress_prefix}处理...")
+            file_info = self._wait_for_file_active(file_name, runtime)
+            file_uri = self._file_field(file_info, "uri") or file_uri
+
+        self.report_progress(f"正在调用 Gemini 解析{progress_prefix}...")
+        response_data = self._generate_content_when_ready(
+            file_name,
+            file_uri,
+            mime_type,
+            runtime,
+            prompt=prompt,
+        )
+        raw_text = self._extract_candidate_text(response_data)
+        parsed = self._parse_json_text(raw_text)
+        return {
+            "raw_text": raw_text,
+            "parsed": parsed,
+            "usage": response_data.get("usageMetadata") or {},
+            "file_name": file_name,
+            "file_uri": file_uri,
+        }
+
+    def _segment_prompt(
+        self,
+        base_prompt: str,
+        index: int,
+        total: int,
+        start_sec: Optional[float],
+        end_sec: Optional[float],
+    ) -> str:
+        start = "未知" if start_sec is None else f"{start_sec:.2f}s"
+        end = "未知" if end_sec is None else f"{end_sec:.2f}s"
+        return (
+            f"这是原始视频切分后的第 {index}/{total} 段，时间范围约 {start} - {end}。\n"
+            "请只解析这一段内容，并在时间线和总结中保留该分段上下文，便于后续合并成完整视频理解。\n"
+            f"用户原始要求：{base_prompt}"
+        )
+
+    def _probe_duration(self, path: str) -> Optional[float]:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            path,
+        ]
+        try:
+            completed = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60,
+            )
+            stdout = completed.stdout.decode("utf-8", errors="replace").strip()
+            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+            if completed.returncode != 0:
+                logger.warning(
+                    f"[VideoParse] ffprobe duration exited with {completed.returncode} for {path}: "
+                    f"{self._tail(stderr or stdout, 500)}"
+                )
+                return None
+            data = json.loads(stdout or "{}")
+            candidates = []
+            format_duration = self._float_value(self._get_nested(data, "format", "duration"))
+            if format_duration:
+                candidates.append(format_duration)
+            for stream in data.get("streams") or []:
+                stream_duration = self._float_value(stream.get("duration"))
+                if stream_duration:
+                    candidates.append(stream_duration)
+            if not candidates:
+                return None
+            return max(candidates)
+        except Exception as e:
+            logger.warning(f"[VideoParse] ffprobe duration parse failed for {path}: {e}")
+            return None
+
+    def _split_video(
+        self,
+        path: str,
+        work_dir: str,
+        segment_seconds: int,
+        timeout: int,
+        max_bytes: int,
+    ) -> List[Dict[str, Any]]:
+        segment_dir = os.path.join(work_dir, "segments")
+        os.makedirs(segment_dir, exist_ok=True)
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in VIDEO_FILE_EXTENSIONS:
+            ext = ".mp4"
+        output_pattern = os.path.join(segment_dir, f"segment_%04d{ext}")
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            path,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c",
+            "copy",
+            "-f",
+            "segment",
+            "-segment_time",
+            str(segment_seconds),
+            "-reset_timestamps",
+            "1",
+            output_pattern,
+        ]
+        logger.info(f"[VideoParse] Splitting video into {segment_seconds}s segments: {path} -> {segment_dir}")
+        try:
+            completed = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            raise VideoParseError(f"ffmpeg split timed out after {timeout}s")
+
+        if completed.returncode != 0:
+            raise VideoParseError(
+                "ffmpeg stream-copy split failed:\n{}".format(self._tail(completed.stdout or ""))
+            )
+
+        segment_paths = []
+        for filename in sorted(os.listdir(segment_dir)):
+            segment_path = os.path.join(segment_dir, filename)
+            if os.path.isfile(segment_path) and os.path.getsize(segment_path) > 0:
+                segment_paths.append(segment_path)
+        if not segment_paths:
+            raise VideoParseError("ffmpeg split completed but no segment file was produced")
+
+        segments = []
+        current_start = 0.0
+        for index, segment_path in enumerate(segment_paths, start=1):
+            probe = self._probe_media(segment_path) or self._guess_media_streams(segment_path)
+            if not probe or not probe["has_video"]:
+                raise VideoParseError(f"Split segment has no video stream: {segment_path}")
+            self._validate_video_size(segment_path, max_bytes)
+            segment_mime = self._detect_mime_type(segment_path)
+            if segment_mime not in SUPPORTED_VIDEO_MIME_TYPES:
+                raise VideoParseError(f"Unsupported segment MIME type: {segment_mime}")
+            segment_duration = self._probe_duration(segment_path)
+            fallback_start = float((index - 1) * segment_seconds)
+            start_sec = current_start if current_start > 0 or index == 1 else fallback_start
+            duration = segment_duration if segment_duration else float(segment_seconds)
+            end_sec = start_sec + duration
+            current_start = end_sec
+            segments.append({
+                "index": index,
+                "path": segment_path,
+                "mime_type": segment_mime,
+                "start_sec": round(start_sec, 2),
+                "end_sec": round(end_sec, 2),
+                "duration_sec": round(duration, 2),
+            })
+        return segments
+
     def _upload_file(self, path: str, mime_type: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
         num_bytes = os.path.getsize(path)
         display_name = os.path.basename(path)
@@ -678,7 +971,7 @@ class VideoParseTool(BaseTool):
         return last_info
 
     def _get_file(self, file_name: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
-        url = "{}/v1beta/{}".format(runtime["api_base"], file_name)
+        url = "{}/v1beta/{}".format(runtime["upload_api_base"], file_name)
         response = requests.get(
             url,
             headers={"x-goog-api-key": runtime["api_key"]},
@@ -694,12 +987,13 @@ class VideoParseTool(BaseTool):
         file_uri: str,
         mime_type: str,
         runtime: Dict[str, Any],
+        prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         deadline = time.time() + runtime["processing_timeout"]
         attempt = 0
         while True:
             try:
-                return self._generate_content(file_uri, mime_type, runtime)
+                return self._generate_content(file_uri, mime_type, runtime, prompt=prompt)
             except VideoParseError as e:
                 if not file_name or not self._is_file_not_active_error(e):
                     raise
@@ -719,7 +1013,13 @@ class VideoParseTool(BaseTool):
                 file_uri = self._file_field(file_info, "uri") or file_uri
                 time.sleep(min(2 * attempt, 10))
 
-    def _generate_content(self, file_uri: str, mime_type: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
+    def _generate_content(
+        self,
+        file_uri: str,
+        mime_type: str,
+        runtime: Dict[str, Any],
+        prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
         url = "{}/v1beta/models/{}:generateContent".format(runtime["api_base"], runtime["model"])
         payload = {
             "contents": [
@@ -731,7 +1031,7 @@ class VideoParseTool(BaseTool):
                                 "file_uri": file_uri,
                             }
                         },
-                        {"text": runtime["prompt"]},
+                        {"text": prompt if prompt is not None else runtime["prompt"]},
                     ]
                 }
             ]
@@ -803,11 +1103,11 @@ class VideoParseTool(BaseTool):
         self,
         work_dir: str,
         local_source_path: Optional[str],
-        file_name: Optional[str],
+        file_names: List[str],
         runtime: Dict[str, Any],
     ) -> None:
-        if runtime.get("delete_remote_file") and file_name:
-            self._delete_remote_file(file_name, runtime)
+        if runtime.get("delete_remote_file"):
+            self._delete_remote_files(file_names, runtime)
 
         if local_source_path and runtime.get("delete_source_on_success"):
             self._remove_file(local_source_path)
@@ -815,9 +1115,13 @@ class VideoParseTool(BaseTool):
         if not runtime.get("keep_temp"):
             self._remove_dir(work_dir)
 
+    def _delete_remote_files(self, file_names: List[str], runtime: Dict[str, Any]) -> None:
+        for file_name in list(dict.fromkeys(file_names or [])):
+            self._delete_remote_file(file_name, runtime)
+
     def _delete_remote_file(self, file_name: str, runtime: Dict[str, Any]) -> None:
         try:
-            url = "{}/v1beta/{}".format(runtime["api_base"], file_name)
+            url = "{}/v1beta/{}".format(runtime["upload_api_base"], file_name)
             response = requests.delete(
                 url,
                 headers={"x-goog-api-key": runtime["api_key"]},
@@ -892,6 +1196,17 @@ class VideoParseTool(BaseTool):
             return int(value)
         except Exception:
             return default
+
+    def _float_value(self, value: Any) -> Optional[float]:
+        try:
+            if value is None or value == "":
+                return None
+            parsed = float(value)
+            if parsed <= 0:
+                return None
+            return parsed
+        except Exception:
+            return None
 
     def _bool_value(self, value: Any) -> bool:
         if isinstance(value, bool):

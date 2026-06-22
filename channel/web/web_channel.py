@@ -3841,6 +3841,8 @@ class VideoParseConfigHandler:
             "ffmpeg_timeout": 300,
             "gemini_timeout": 600,
             "processing_timeout": 300,
+            "split_duration_threshold_sec": 0,
+            "max_segments": 20,
             "max_video_bytes": 2 * 1024 * 1024 * 1024,
             "temp_dir": "",
             "keep_temp": False,
@@ -3920,7 +3922,15 @@ class VideoParseConfigHandler:
     def _normalize_config(cls, cfg: dict) -> dict:
         defaults = cls._default_config()
         normalized = cls._merge_defaults(cfg)
-        for key in ("download_timeout", "ffmpeg_timeout", "gemini_timeout", "processing_timeout", "max_video_bytes"):
+        for key in (
+            "download_timeout",
+            "ffmpeg_timeout",
+            "gemini_timeout",
+            "processing_timeout",
+            "split_duration_threshold_sec",
+            "max_segments",
+            "max_video_bytes",
+        ):
             normalized[key] = max(0, cls._int_value(normalized.get(key), defaults[key]))
         for key in ("keep_temp", "delete_source_on_success", "delete_remote_file", "prefer_json"):
             normalized[key] = cls._bool_value(normalized.get(key))
