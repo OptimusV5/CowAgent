@@ -112,6 +112,12 @@ cow logs -f
 cow install-browser
 ```
 
+下载浏览器内核时可临时指定代理；该代理只作用于 Playwright/Camoufox 浏览器 runtime 下载，不影响 pip 或 npm：
+
+```bash
+cow install-browser --proxy socks5h://127.0.0.1:1080
+```
+
 <Tip>
   仅在需要使用浏览器工具（如网页浏览、截图等）时才需要安装。
 </Tip>

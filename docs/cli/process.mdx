@@ -101,6 +101,12 @@ Install Playwright and Chromium browser for the [browser tool](/tools/browser).
 cow install-browser
 ```
 
+Use a temporary proxy for browser runtime downloads when needed. This only affects Playwright/Camoufox browser runtime downloads, not pip or npm:
+
+```bash
+cow install-browser --proxy socks5h://127.0.0.1:1080
+```
+
 <Tip>
   Only needed when using browser tools (web browsing, screenshots, etc.).
 </Tip>

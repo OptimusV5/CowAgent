@@ -18,6 +18,12 @@ description: 控制浏览器访问和操作网页
     - 在 Linux 上安装系统依赖
     - 下载 Chromium 浏览器（Linux 服务器自动使用无头精简版）
     - 自动检测国内网络并使用镜像加速
+
+    如只想让浏览器内核下载走代理：
+    ```bash
+    cow install-browser --proxy socks5h://127.0.0.1:1080
+    ```
+    该代理不影响 pip 或 npm。
   </Tab>
   <Tab title="手动安装">
     ```bash

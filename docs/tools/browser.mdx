@@ -18,6 +18,12 @@ Control a Chromium browser for web navigation, element interaction and content e
     - Install system dependencies on Linux
     - Download the Chromium browser (Linux servers automatically use the headless build)
     - Detect China-mainland networks and use mirror acceleration
+
+    To proxy only the browser runtime download:
+    ```bash
+    cow install-browser --proxy socks5h://127.0.0.1:1080
+    ```
+    This does not affect pip or npm.
   </Tab>
   <Tab title="Manual install">
     ```bash

@@ -4,6 +4,7 @@ import os
 import sys
 import subprocess
 from typing import Callable, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import click
 
@@ -11,6 +12,7 @@ PLAYWRIGHT_VERSION = "1.52.0"
 PLAYWRIGHT_LEGACY_VERSION = "1.28.0"
 GLIBC_THRESHOLD = (2, 28)
 CHINA_MIRROR = "https://registry.npmmirror.com/-/binary/playwright"
+SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
 
 # stream(msg, fg=None) — fg is "yellow" | "green" | "red" | None
 StreamFn = Callable[[str, Optional[str]], None]
@@ -77,6 +79,53 @@ def _is_china_network() -> bool:
         return False
 
 
+def _normalize_download_proxy(value: str) -> str:
+    proxy = str(value or "").strip()
+    if not proxy:
+        return ""
+    parsed = urlsplit(proxy)
+    scheme = parsed.scheme.lower()
+    if scheme not in SUPPORTED_PROXY_SCHEMES:
+        raise ValueError("proxy scheme must be one of: http, https, socks5, socks5h")
+    if not parsed.hostname:
+        raise ValueError("proxy host is required")
+    try:
+        port = parsed.port
+    except ValueError as e:
+        raise ValueError("proxy port must be a valid integer between 1 and 65535") from e
+    if port is None:
+        raise ValueError("proxy port is required")
+    if not (1 <= port <= 65535):
+        raise ValueError("proxy port must be between 1 and 65535")
+    return urlunsplit((scheme, parsed.netloc, parsed.path or "", parsed.query or "", parsed.fragment or ""))
+
+
+def _mask_proxy_url(value: str) -> str:
+    proxy = str(value or "").strip()
+    if not proxy:
+        return ""
+    try:
+        parsed = urlsplit(proxy)
+        if parsed.password is None:
+            return proxy
+        username = parsed.username or ""
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        auth = f"{username}:****@" if username else "****@"
+        return urlunsplit((parsed.scheme, f"{auth}{host}{port}", parsed.path or "", parsed.query or "", parsed.fragment or ""))
+    except Exception:
+        return proxy
+
+
+def _download_env(proxy: str = "") -> dict:
+    env = os.environ.copy()
+    normalized = _normalize_download_proxy(proxy)
+    if normalized:
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            env[key] = normalized
+    return env
+
+
 def _pip_install(package_spec: str, stream: StreamFn) -> int:
     """Install a package, preferring prebuilt wheels; retry with --user on perm error."""
     python = sys.executable
@@ -104,22 +153,29 @@ def run_install_browser(
     stream: Optional[StreamFn] = None,
     on_phase: Optional[PhaseFn] = None,
     engine: str = "playwright",
+    proxy: str = "",
 ) -> int:
     engine = (engine or "playwright").strip().lower()
+    try:
+        proxy = _normalize_download_proxy(proxy)
+    except ValueError as e:
+        stream = stream or _default_stream
+        stream(str(e), "red")
+        return 1
     if engine in ("playwright", "chromium"):
-        return run_install_playwright_browser(stream=stream, on_phase=on_phase)
+        return run_install_playwright_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
     if engine == "camofox":
         return run_install_camofox_browser(stream=stream, on_phase=on_phase)
     if engine == "camoufox":
-        return run_install_camoufox_browser(stream=stream, on_phase=on_phase)
+        return run_install_camoufox_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
     if engine == "all":
-        ret = run_install_playwright_browser(stream=stream, on_phase=on_phase)
+        ret = run_install_playwright_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
         if ret != 0:
             return ret
         ret = run_install_camofox_browser(stream=stream, on_phase=on_phase)
         if ret != 0:
             return ret
-        return run_install_camoufox_browser(stream=stream, on_phase=on_phase)
+        return run_install_camoufox_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
     stream = stream or _default_stream
     stream(f"Unknown browser engine: {engine}", "red")
     return 1
@@ -128,6 +184,7 @@ def run_install_browser(
 def run_install_playwright_browser(
     stream: Optional[StreamFn] = None,
     on_phase: Optional[PhaseFn] = None,
+    download_proxy: str = "",
 ) -> int:
     """
     Install Playwright Python package, optional Linux deps, and Chromium.
@@ -275,7 +332,9 @@ def run_install_playwright_browser(
     elif sys.platform == "linux" and _has_display():
         stream("  (full browser for Linux desktop)", None)
 
-    env = os.environ.copy()
+    env = _download_env(download_proxy)
+    if download_proxy:
+        stream(f"  (browser download proxy: {_mask_proxy_url(download_proxy)})", None)
     use_mirror = _is_china_network()
     if use_mirror:
         env["PLAYWRIGHT_DOWNLOAD_HOST"] = CHINA_MIRROR
@@ -293,7 +352,7 @@ def run_install_playwright_browser(
             "⚠️ 镜像下载失败，正在改用官方源重试…",
             "⚠️ Mirror download failed; retrying with the official CDN…",
         ))
-        env_no_mirror = os.environ.copy()
+        env_no_mirror = _download_env(download_proxy)
         env_no_mirror.pop("PLAYWRIGHT_DOWNLOAD_HOST", None)
         ret = subprocess.call(cmd, env=env_no_mirror)
 
@@ -415,6 +474,7 @@ def run_install_camofox_browser(
 def run_install_camoufox_browser(
     stream: Optional[StreamFn] = None,
     on_phase: Optional[PhaseFn] = None,
+    download_proxy: str = "",
 ) -> int:
     """Install daijro/camoufox Python package and fetch its browser runtime."""
     from cli.utils import get_cli_language
@@ -443,7 +503,9 @@ def run_install_camoufox_browser(
         "🌐 [2/2] Downloading Camoufox browser runtime…",
     ))
     stream("[2/2] Fetching Camoufox browser runtime...", "yellow")
-    ret = subprocess.call([python, "-m", "camoufox", "fetch"])
+    if download_proxy:
+        stream(f"  (browser download proxy: {_mask_proxy_url(download_proxy)})", None)
+    ret = subprocess.call([python, "-m", "camoufox", "fetch"], env=_download_env(download_proxy))
     if ret != 0:
         stream("Failed to fetch Camoufox browser runtime.", "red")
         stream("Run manually: python3 -m camoufox fetch", "yellow")
@@ -475,8 +537,13 @@ def run_install_camoufox_browser(
     show_default=True,
     help="Browser backend to install.",
 )
-def install_browser(engine):
+@click.option(
+    "--proxy",
+    default="",
+    help="Proxy for browser runtime downloads only, e.g. socks5h://127.0.0.1:1080. Does not affect pip or npm.",
+)
+def install_browser(engine, proxy):
     """Install browser tool dependencies."""
-    code = run_install_browser(engine=engine)
+    code = run_install_browser(engine=engine, proxy=proxy)
     if code != 0:
         raise SystemExit(code)
