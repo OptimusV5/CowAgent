@@ -32,6 +32,7 @@ from common import utils
 from common.expired_dict import ExpiredDict
 from common.log import logger
 from common.singleton import singleton
+from common.utils import expand_path
 from config import conf
 
 # Suppress verbose logs from Lark SDK
@@ -565,14 +566,35 @@ class FeiShuChanel(ChatChannel):
                     pass
                 return
             cached_file_type = getattr(feishu_msg, "file_type", "file")
-            file_cache.add(session_id, feishu_msg.content, file_type=cached_file_type)
+            resource_key = self._feishu_message_resource_key(feishu_msg)
+            file_cache.add(
+                session_id,
+                feishu_msg.content,
+                file_type=cached_file_type,
+                channel="feishu",
+                message_id=feishu_msg.msg_id,
+                resource_key=resource_key,
+                resource_type=cached_file_type,
+                file_name=os.path.basename(feishu_msg.content),
+            )
             logger.info(f"[FeiShu] {cached_file_type.capitalize()} cached for session {session_id}: {feishu_msg.content}")
             return
+
+        quote_attached = False
+        if feishu_msg.ctype == ContextType.TEXT and conf().get("feishu_include_quote_content", True):
+            quote_text = self._build_quote_context(feishu_msg, session_id, file_cache)
+            if quote_text:
+                quote_attached = self._quote_context_has_attachment(quote_text)
+                feishu_msg.content = "{}\n\n[当前消息]\n{}".format(
+                    quote_text,
+                    feishu_msg.content,
+                ).strip()
+                logger.info(f"[FeiShu] Attached quote context to message, has_attachment={quote_attached}")
 
         # 如果是文本消息，检查是否有缓存的文件
         if feishu_msg.ctype == ContextType.TEXT:
             cached_files = file_cache.get(session_id)
-            if cached_files:
+            if cached_files and not quote_attached:
                 # 将缓存的文件附加到文本消息中
                 file_refs = []
                 for file_info in cached_files:
@@ -1155,6 +1177,280 @@ class FeiShuChanel(ChatChannel):
                 return res.get("tenant_access_token")
         else:
             logger.error(f"[FeiShu] fetch token error, res={response}")
+
+    def _feishu_message_resource_key(self, feishu_msg: FeishuMessage) -> str:
+        try:
+            content = json.loads(feishu_msg.raw_content or "{}")
+        except Exception:
+            return ""
+        if feishu_msg.msg_type == "image":
+            return content.get("image_key") or ""
+        return content.get("file_key") or ""
+
+    def _quote_message_id(self, feishu_msg: FeishuMessage) -> str:
+        for field in ("parent_id", "upper_message_id", "root_id"):
+            value = getattr(feishu_msg, field, None)
+            if value and value != feishu_msg.msg_id:
+                return value
+        return ""
+
+    def _build_quote_context(self, feishu_msg: FeishuMessage, session_id: str, file_cache) -> str:
+        quote_msg_id = self._quote_message_id(feishu_msg)
+        if not quote_msg_id:
+            return ""
+
+        detail = self._fetch_feishu_message_detail(
+            quote_msg_id,
+            feishu_msg.access_token,
+            timeout=self._int_config("feishu_quote_fetch_timeout", 5),
+        )
+        if not detail:
+            return "[引用消息]\n获取失败或无权限读取引用消息\n[/引用消息]"
+
+        message = detail.get("message") if isinstance(detail.get("message"), dict) else detail
+        msg_type = message.get("message_type") or "unknown"
+        raw_content = message.get("content") or "{}"
+        try:
+            content = json.loads(raw_content) if isinstance(raw_content, str) else (raw_content or {})
+        except Exception:
+            content = {}
+
+        max_chars = self._int_config("feishu_quote_max_chars", 4000)
+        text_parts = self._extract_feishu_message_text(msg_type, content)
+        if text_parts and max_chars > 0:
+            text_parts = text_parts[:max_chars]
+
+        resources = self._extract_feishu_message_resources(message, msg_type, content)
+        attachment_refs = []
+        if conf().get("feishu_quote_download_media", True):
+            for resource in resources:
+                path = self._resolve_feishu_quote_resource(
+                    session_id,
+                    quote_msg_id,
+                    resource,
+                    feishu_msg.access_token,
+                    file_cache,
+                )
+                if path:
+                    attachment_refs.append(self._format_file_ref(resource.get("file_type"), path))
+                else:
+                    attachment_refs.append(f"[引用附件下载失败: {resource.get('resource_key') or resource.get('file_name') or resource.get('file_type')}]")
+        else:
+            for resource in resources:
+                attachment_refs.append(f"[引用附件: {resource.get('file_type')}]")
+
+        lines = ["[引用消息]", f"类型: {msg_type}", f"消息ID: {quote_msg_id}"]
+        if text_parts:
+            lines.extend(["内容:", text_parts])
+        if attachment_refs:
+            lines.append("附件:")
+            lines.extend(attachment_refs)
+        lines.append("[/引用消息]")
+        return "\n".join(lines)
+
+    def _fetch_feishu_message_detail(self, message_id: str, access_token: str, timeout: int = 5) -> dict:
+        url = f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}"
+        headers = {"Authorization": "Bearer " + access_token}
+        try:
+            response = requests.get(url=url, headers=headers, timeout=timeout)
+            if response.status_code != 200:
+                logger.warning(f"[FeiShu] Failed to fetch quote message, msg_id={message_id}, status={response.status_code}, res={response.text[:300]}")
+                return {}
+            data = response.json()
+            if data.get("code") != 0:
+                logger.warning(f"[FeiShu] Failed to fetch quote message, msg_id={message_id}, data={data}")
+                return {}
+            return data.get("data") or {}
+        except Exception as e:
+            logger.warning(f"[FeiShu] Exception fetching quote message, msg_id={message_id}: {e}")
+            return {}
+
+    def _extract_feishu_message_text(self, msg_type: str, content: dict) -> str:
+        if msg_type == "text":
+            return str(content.get("text") or "").strip()
+        if msg_type == "post":
+            title = str(content.get("title") or "").strip()
+            text_parts = [title] if title else []
+            for block in content.get("content") or []:
+                if not isinstance(block, list):
+                    continue
+                for element in block:
+                    if element.get("tag") == "text" and element.get("text"):
+                        text_parts.append(str(element.get("text")))
+                    elif element.get("tag") == "a" and element.get("text"):
+                        text_parts.append(str(element.get("text")))
+                if text_parts:
+                    text_parts.append("\n")
+            return "".join(text_parts).strip()
+        if msg_type == "file":
+            return str(content.get("file_name") or "[文件消息]").strip()
+        if msg_type == "media":
+            return str(content.get("file_name") or "[视频消息]").strip()
+        if msg_type == "image":
+            return "[图片消息]"
+        if msg_type == "audio":
+            return "[语音消息]"
+        return f"[{msg_type} 消息]"
+
+    def _extract_feishu_message_resources(self, message: dict, msg_type: str, content: dict) -> list:
+        resources = []
+        if msg_type == "image" and content.get("image_key"):
+            resources.append({
+                "resource_key": content.get("image_key"),
+                "resource_type": "image",
+                "file_type": "image",
+                "suffix": "png",
+            })
+        elif msg_type == "file" and content.get("file_key"):
+            file_name = content.get("file_name") or content.get("name") or content.get("file_key")
+            resources.append({
+                "resource_key": content.get("file_key"),
+                "resource_type": "file",
+                "file_type": "file",
+                "file_name": file_name,
+                "suffix": utils.get_path_suffix(file_name) or "bin",
+            })
+        elif msg_type == "media" and content.get("file_key"):
+            file_name = content.get("file_name") or f"{content.get('file_key')}.mp4"
+            resources.append({
+                "resource_key": content.get("file_key"),
+                "resource_type": "media",
+                "file_type": "video",
+                "file_name": file_name,
+                "suffix": utils.get_path_suffix(file_name) or "mp4",
+            })
+        elif msg_type == "audio" and content.get("file_key"):
+            resources.append({
+                "resource_key": content.get("file_key"),
+                "resource_type": "file",
+                "file_type": "audio",
+                "file_name": f"{content.get('file_key')}.opus",
+                "suffix": "opus",
+            })
+        elif msg_type == "post":
+            for block in content.get("content") or []:
+                if not isinstance(block, list):
+                    continue
+                for element in block:
+                    if element.get("tag") == "img" and element.get("image_key"):
+                        resources.append({
+                            "resource_key": element.get("image_key"),
+                            "resource_type": "image",
+                            "file_type": "image",
+                            "suffix": "png",
+                        })
+        return resources
+
+    def _resolve_feishu_quote_resource(self, session_id: str, message_id: str, resource: dict, access_token: str, file_cache) -> str:
+        resource_key = resource.get("resource_key") or ""
+        file_type = resource.get("file_type") or "file"
+        cached = file_cache.find(
+            session_id,
+            channel="feishu",
+            message_id=message_id,
+            resource_key=resource_key,
+        )
+        if cached and self._is_usable_file(cached.get("path")):
+            logger.info(f"[FeiShu] Quote resource hit cache: msg_id={message_id}, key={resource_key}, path={cached.get('path')}")
+            return cached.get("path")
+
+        local_path = self._feishu_resource_local_path(resource)
+        if self._is_usable_file(local_path):
+            file_cache.add(
+                session_id,
+                local_path,
+                file_type=file_type,
+                channel="feishu",
+                message_id=message_id,
+                resource_key=resource_key,
+                resource_type=resource.get("resource_type"),
+                file_name=resource.get("file_name") or os.path.basename(local_path),
+            )
+            logger.info(f"[FeiShu] Quote resource found local file: msg_id={message_id}, key={resource_key}, path={local_path}")
+            return local_path
+
+        if not self._download_feishu_resource(message_id, resource, access_token, local_path):
+            return ""
+        file_cache.add(
+            session_id,
+            local_path,
+            file_type=file_type,
+            channel="feishu",
+            message_id=message_id,
+            resource_key=resource_key,
+            resource_type=resource.get("resource_type"),
+            file_name=resource.get("file_name") or os.path.basename(local_path),
+        )
+        return local_path
+
+    def _download_feishu_resource(self, message_id: str, resource: dict, access_token: str, target_path: str) -> bool:
+        resource_key = resource.get("resource_key")
+        if not resource_key:
+            return False
+        url = f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/resources/{resource_key}"
+        headers = {"Authorization": "Bearer " + access_token}
+        resource_type = resource.get("resource_type") or "file"
+        candidates = [resource_type]
+        if resource_type == "media":
+            candidates = ["file", "media"]
+        elif resource_type == "image":
+            candidates = ["image"]
+        last_response = None
+        for candidate in candidates:
+            try:
+                response = requests.get(
+                    url=url,
+                    headers=headers,
+                    params={"type": candidate},
+                    timeout=(self._int_config("feishu_quote_fetch_timeout", 5), 60),
+                )
+                last_response = response
+                logger.info(
+                    f"[FeiShu] download quote resource response: msg_id={message_id}, "
+                    f"key={resource_key}, type={candidate}, status={response.status_code}, size={len(response.content)}"
+                )
+                if response.status_code == 200:
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with open(target_path, "wb") as f:
+                        f.write(response.content)
+                    return self._is_usable_file(target_path)
+            except Exception as e:
+                logger.warning(f"[FeiShu] Exception downloading quote resource, msg_id={message_id}, key={resource_key}, type={candidate}: {e}")
+        if last_response is not None:
+            logger.warning(
+                f"[FeiShu] Failed to download quote resource, msg_id={message_id}, "
+                f"key={resource_key}, status={last_response.status_code}, res={last_response.text[:300]}"
+            )
+        return False
+
+    def _feishu_resource_local_path(self, resource: dict) -> str:
+        workspace_root = expand_path(conf().get("agent_workspace", "~/cow"))
+        tmp_dir = os.path.join(workspace_root, "tmp")
+        resource_key = resource.get("resource_key") or "quote_resource"
+        suffix = resource.get("suffix") or utils.get_path_suffix(resource.get("file_name") or "") or "bin"
+        safe_suffix = str(suffix).lstrip(".") or "bin"
+        return os.path.join(tmp_dir, f"{resource_key}.{safe_suffix}")
+
+    def _format_file_ref(self, file_type: str, path: str) -> str:
+        if file_type == "image":
+            return f"[图片: {path}]"
+        if file_type == "video":
+            return f"[视频: {path}]"
+        if file_type == "audio":
+            return f"[语音: {path}]"
+        return f"[文件: {path}]"
+
+    def _quote_context_has_attachment(self, quote_text: str) -> bool:
+        return any(marker in quote_text for marker in ("[图片:", "[视频:", "[文件:", "[语音:"))
+
+    def _is_usable_file(self, path: str) -> bool:
+        return bool(path and os.path.isfile(path) and os.path.getsize(path) > 0)
+
+    def _int_config(self, key: str, default: int) -> int:
+        try:
+            return int(conf().get(key, default))
+        except Exception:
+            return default
 
     def _upload_image_url(self, img_url, access_token):
         logger.debug(f"[FeiShu] start process image, img_url={img_url}")

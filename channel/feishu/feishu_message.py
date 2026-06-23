@@ -19,7 +19,13 @@ class FeishuMessage(ChatMessage):
         self.msg_id = msg.get("message_id")
         self.create_time = msg.get("create_time")
         self.is_group = is_group
+        self.chat_id = msg.get("chat_id")
+        self.root_id = msg.get("root_id")
+        self.parent_id = msg.get("parent_id")
+        self.upper_message_id = msg.get("upper_message_id")
         msg_type = msg.get("message_type")
+        self.msg_type = msg_type
+        self.raw_content = msg.get("content")
 
         if msg_type == "text":
             self.ctype = ContextType.TEXT

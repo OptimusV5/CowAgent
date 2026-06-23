@@ -19,7 +19,7 @@ class FileCache:
         self.cache = {}
         self.ttl = ttl
     
-    def add(self, session_id: str, file_path: str, file_type: str = "image"):
+    def add(self, session_id: str, file_path: str, file_type: str = "image", **metadata):
         """
         添加文件到缓存
         
@@ -27,6 +27,7 @@ class FileCache:
             session_id: 会话ID
             file_path: 文件本地路径
             file_type: 文件类型（image, video, file 等）
+            metadata: 可选元数据，用于按平台消息/资源 key 精确匹配
         """
         if session_id not in self.cache:
             self.cache[session_id] = {
@@ -36,6 +37,9 @@ class FileCache:
         
         # 添加文件（去重）
         file_info = {'path': file_path, 'type': file_type}
+        for key, value in metadata.items():
+            if value is not None and value != "":
+                file_info[key] = value
         if file_info not in self.cache[session_id]['files']:
             self.cache[session_id]['files'].append(file_info)
             logger.info(f"[FileCache] Added {file_type} to cache for session {session_id}: {file_path}")
@@ -62,6 +66,36 @@ class FileCache:
             return []
         
         return item['files']
+
+    def find(self, session_id: str, **criteria) -> dict:
+        """
+        按元数据精确查找缓存文件。
+
+        Args:
+            session_id: 会话ID
+            criteria: 匹配条件，例如 message_id/resource_key/file_type/channel
+
+        Returns:
+            命中的文件信息 dict，未命中返回 {}
+        """
+        files = self.get(session_id)
+        normalized = {
+            ("type" if key == "file_type" else key): value
+            for key, value in criteria.items()
+            if value is not None and value != ""
+        }
+        if not normalized:
+            return {}
+
+        for file_info in files:
+            matched = True
+            for key, value in normalized.items():
+                if file_info.get(key) != value:
+                    matched = False
+                    break
+            if matched:
+                return file_info
+        return {}
     
     def clear(self, session_id: str):
         """
