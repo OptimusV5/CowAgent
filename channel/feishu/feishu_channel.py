@@ -15,6 +15,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import ssl
 import threading
 # -*- coding=utf-8 -*-
@@ -245,6 +246,7 @@ class FeiShuChanel(ChatChannel):
         self._ws_client = None
         self._ws_thread = None
         self._bot_open_id = None  # cached bot open_id for @-mention matching
+        self._sent_card_messages = ExpiredDict(60 * 60 * 24 * 14)
         logger.debug("[FeiShu] app_id={}, app_secret={}, verification_token={}, event_mode={}".format(
             self.feishu_app_id, self.feishu_app_secret, self.feishu_token, self.feishu_event_mode))
         # 无需群校验和前缀
@@ -940,6 +942,13 @@ class FeiShuChanel(ChatChannel):
                 mid = send_json["data"]["message_id"]
                 with lock:
                     message_id[0] = mid
+                try:
+                    self._sent_card_messages[mid] = {
+                        "card_id": cid,
+                        "content": "",
+                    }
+                except Exception:
+                    pass
                 logger.info(
                     f"[FeiShu] Stream: card created and sent, "
                     f"card_id={cid}, message_id={mid}"
@@ -975,6 +984,11 @@ class FeiShuChanel(ChatChannel):
                     logger.warning(
                         f"[FeiShu] Stream: update text failed: {res_json}"
                     )
+                else:
+                    with lock:
+                        mid = message_id[0]
+                    if mid:
+                        self._remember_feishu_card_message(mid, cid, full_text)
             except Exception as e:
                 logger.warning(f"[FeiShu] Stream: update text exception: {e}")
 
@@ -1021,6 +1035,11 @@ class FeiShuChanel(ChatChannel):
                     logger.warning(
                         f"[FeiShu] Stream: finalize card (close+summary) failed: {res_json}"
                     )
+                else:
+                    with lock:
+                        mid = message_id[0]
+                    if mid:
+                        self._remember_feishu_card_message(mid, cid, final_text)
             except Exception as e:
                 logger.warning(
                     f"[FeiShu] Stream: finalize card exception: {e}"
@@ -1216,6 +1235,9 @@ class FeiShuChanel(ChatChannel):
             content = {}
 
         max_chars = self._int_config("feishu_quote_max_chars", 4000)
+        user_card_content = self._extract_user_card_content(message)
+        if msg_type == "interactive" and user_card_content:
+            content["_user_card_content"] = user_card_content
         text_parts = self._extract_feishu_message_text(msg_type, content)
         if text_parts and max_chars > 0:
             text_parts = text_parts[:max_chars]
@@ -1251,8 +1273,13 @@ class FeiShuChanel(ChatChannel):
     def _fetch_feishu_message_detail(self, message_id: str, access_token: str, timeout: int = 5) -> dict:
         url = f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}"
         headers = {"Authorization": "Bearer " + access_token}
-        try:
-            response = requests.get(url=url, headers=headers, timeout=timeout)
+        def _request(params=None) -> dict:
+            response = requests.get(
+                url=url,
+                headers=headers,
+                params=params,
+                timeout=timeout,
+            )
             if response.status_code != 200:
                 logger.warning(f"[FeiShu] Failed to fetch quote message, msg_id={message_id}, status={response.status_code}, res={response.text[:300]}")
                 return {}
@@ -1261,6 +1288,15 @@ class FeiShuChanel(ChatChannel):
                 logger.warning(f"[FeiShu] Failed to fetch quote message, msg_id={message_id}, data={data}")
                 return {}
             return data.get("data") or {}
+
+        try:
+            detail = _request()
+            user_card_detail = _request({"card_msg_content_type": "user_card_content"})
+            if not detail:
+                return user_card_detail
+            if user_card_detail.get("items"):
+                detail["_user_card_content_items"] = user_card_detail.get("items")
+            return detail
         except Exception as e:
             logger.warning(f"[FeiShu] Exception fetching quote message, msg_id={message_id}: {e}")
             return {}
@@ -1270,16 +1306,20 @@ class FeiShuChanel(ChatChannel):
         if not isinstance(detail, dict):
             return {}
 
-        message = detail.get("message") if isinstance(detail.get("message"), dict) else detail
+        if isinstance(detail.get("message"), dict):
+            message = detail.get("message")
+        elif isinstance(detail.get("items"), list) and detail.get("items"):
+            message = detail.get("items")[0]
+        else:
+            message = detail
+        if not isinstance(message, dict):
+            return {}
 
-        # Receive event shape: {"message_type": "...", "content": "..."}.
-        if message.get("message_type") or message.get("content"):
-            return message
-
-        # Get message API shape: {"msg_type": "...", "body": {"content": "..."}}.
         body = message.get("body") if isinstance(message.get("body"), dict) else {}
-        content = body.get("content")
-        if content is None and isinstance(message.get("content"), str):
+        content = message.get("content")
+        if content is None:
+            content = body.get("content")
+        if content is None:
             content = message.get("content")
         if content is None:
             content = "{}"
@@ -1287,7 +1327,22 @@ class FeiShuChanel(ChatChannel):
         normalized = dict(message)
         normalized["message_type"] = message.get("msg_type") or message.get("message_type") or "unknown"
         normalized["content"] = content
+        user_items = detail.get("_user_card_content_items")
+        if isinstance(user_items, list) and user_items:
+            user_item = user_items[0]
+            user_body = user_item.get("body") if isinstance(user_item, dict) and isinstance(user_item.get("body"), dict) else {}
+            normalized["user_card_content"] = user_item.get("content") or user_body.get("content") or ""
         return normalized
+
+    def _extract_user_card_content(self, message: dict) -> dict:
+        raw = message.get("user_card_content") if isinstance(message, dict) else ""
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
 
     def _extract_feishu_message_text(self, msg_type: str, content: dict) -> str:
         if msg_type == "text":
@@ -1303,9 +1358,15 @@ class FeiShuChanel(ChatChannel):
                         text_parts.append(str(element.get("text")))
                     elif element.get("tag") == "a" and element.get("text"):
                         text_parts.append(str(element.get("text")))
+                    elif element.get("tag") == "at":
+                        text_parts.append(str(element.get("user_name") or element.get("user_id") or ""))
+                    elif element.get("tag") == "code_block" and element.get("text"):
+                        text_parts.append(str(element.get("text")))
                 if text_parts:
                     text_parts.append("\n")
             return "".join(text_parts).strip()
+        if msg_type == "interactive":
+            return self._extract_feishu_card_text(content) or "[卡片消息]"
         if msg_type == "file":
             return str(content.get("file_name") or "[文件消息]").strip()
         if msg_type == "media":
@@ -1315,6 +1376,104 @@ class FeiShuChanel(ChatChannel):
         if msg_type == "audio":
             return "[语音消息]"
         return f"[{msg_type} 消息]"
+
+    def _remember_feishu_card_message(self, message_id: str, card_id: str, text: str):
+        if not message_id:
+            return
+        try:
+            self._sent_card_messages[message_id] = {
+                "card_id": card_id,
+                "content": text or "",
+            }
+        except Exception:
+            pass
+
+    def _extract_feishu_card_text(self, content: dict) -> str:
+        if not isinstance(content, dict):
+            return ""
+
+        candidates = [content]
+        user_card_content = content.get("_user_card_content")
+        if isinstance(user_card_content, dict):
+            candidates.append(user_card_content)
+
+        card_refs = []
+        for candidate in candidates:
+            card_ref = self._extract_feishu_card_ref(candidate)
+            if card_ref and card_ref not in card_refs:
+                card_refs.append(card_ref)
+
+        for card_ref in card_refs:
+            remembered = self._find_remembered_feishu_card(card_ref)
+            if remembered:
+                return remembered
+
+        text_parts = []
+        for candidate in candidates:
+            self._collect_feishu_card_text(candidate, text_parts)
+        text = "\n".join(part for part in text_parts if part).strip()
+        if text:
+            return text
+
+        if card_refs:
+            return f"[卡片消息: card_id={card_refs[0]}]"
+        return ""
+
+    def _extract_feishu_card_ref(self, content: dict) -> str:
+        data = content.get("data")
+        if isinstance(data, dict):
+            card_id = data.get("card_id")
+            if card_id:
+                return str(card_id)
+        card_id = content.get("card_id")
+        return str(card_id) if card_id else ""
+
+    def _find_remembered_feishu_card(self, card_id: str) -> str:
+        if not card_id:
+            return ""
+        try:
+            for _, item in self._sent_card_messages.items():
+                if isinstance(item, dict) and item.get("card_id") == card_id:
+                    return str(item.get("content") or "").strip()
+        except Exception:
+            return ""
+        return ""
+
+    def _collect_feishu_card_text(self, node, out: list):
+        if isinstance(node, dict):
+            tag = node.get("tag")
+            if tag == "markdown" and node.get("content"):
+                out.append(str(node.get("content")))
+            elif tag in ("plain_text", "lark_md") and node.get("content"):
+                out.append(str(node.get("content")))
+            elif tag == "button":
+                self._collect_feishu_card_text(node.get("text"), out)
+            elif tag == "text":
+                text = node.get("text")
+                if isinstance(text, str):
+                    out.append(text)
+                else:
+                    self._collect_feishu_card_text(text, out)
+            elif tag == "note":
+                self._collect_feishu_card_text(node.get("elements"), out)
+            else:
+                for key in ("title", "subtitle", "content", "text", "elements", "body", "header", "columns", "items", "fields"):
+                    value = node.get(key)
+                    if value is not None:
+                        self._collect_feishu_card_text(value, out)
+        elif isinstance(node, list):
+            for item in node:
+                self._collect_feishu_card_text(item, out)
+        elif isinstance(node, str):
+            cleaned = node.strip()
+            if cleaned and not self._looks_like_feishu_card_metadata(cleaned):
+                out.append(cleaned)
+
+    def _looks_like_feishu_card_metadata(self, value: str) -> bool:
+        return bool(
+            re.fullmatch(r"\d+(px|%)?", value)
+            or value in {"...", "2.0", "card", "template", "card_json", "vertical", "horizontal", "left", "right", "center", "default"}
+        )
 
     def _extract_feishu_message_resources(self, message: dict, msg_type: str, content: dict) -> list:
         resources = []
