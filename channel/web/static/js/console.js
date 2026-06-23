@@ -4684,6 +4684,8 @@ function initBrowserConfigView(data) {
     const camoufoxUserDataEl = document.getElementById('cfg-camoufox-user-data');
     if (camoufoxUserDataEl) camoufoxUserDataEl.value = camoufox.user_data_dir || '~/.cow/camoufox_profile';
     initSecretInput(document.getElementById('cfg-camoufox-proxy'), camoufox.proxy_masked || '');
+    const camoufoxIdleTimeoutEl = document.getElementById('cfg-camoufox-idle-timeout');
+    if (camoufoxIdleTimeoutEl) camoufoxIdleTimeoutEl.value = camoufox.idle_timeout == null ? 10 : camoufox.idle_timeout;
     const osEl = document.getElementById('cfg-camoufox-os');
     if (osEl) {
         initDropdown(osEl, [
@@ -4710,6 +4712,8 @@ function initBrowserConfigView(data) {
 
 function collectBrowserConfigPayload() {
     const engine = (getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
+    const camoufoxIdleRaw = document.getElementById('cfg-camoufox-idle-timeout')?.value;
+    const camoufoxIdleParsed = parseInt(camoufoxIdleRaw == null || camoufoxIdleRaw === '' ? '10' : camoufoxIdleRaw, 10);
     const payload = {
         engine,
         playwright: {
@@ -4729,6 +4733,7 @@ function collectBrowserConfigPayload() {
             geoip: document.getElementById('cfg-camoufox-geoip')?.checked === true,
             fingerprint_preset: document.getElementById('cfg-camoufox-fingerprint-preset')?.checked === true,
             os: getDropdownValue(document.getElementById('cfg-camoufox-os')) || '',
+            idle_timeout: Math.max(0, Number.isFinite(camoufoxIdleParsed) ? camoufoxIdleParsed : 10),
         },
     };
     const backendProxyEl = document.getElementById('cfg-browser-backend-proxy');

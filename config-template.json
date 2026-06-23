@@ -49,7 +49,10 @@
   "tools": {
     "browser": {
       "engine": "playwright",
-      "backend_proxy": ""
+      "backend_proxy": "",
+      "camoufox": {
+        "idle_timeout": 10
+      }
     },
     "video_parse": {
       "model": "gemini-2.5-flash",

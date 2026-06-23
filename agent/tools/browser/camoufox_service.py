@@ -17,6 +17,7 @@ from common.utils import expand_path
 
 
 _DEFAULT_USER_DATA_DIR = "~/.cow/camoufox_profile"
+_DEFAULT_IDLE_TIMEOUT = 10
 _DEFAULT_INSTALL_HINT = (
     "Install Camoufox with: python3 -m pip install -U camoufox && "
     "python3 -m camoufox fetch"
@@ -72,6 +73,7 @@ class CamoufoxBrowserService(BrowserService):
         camoufox_cfg = browser_cfg.get("camoufox") if isinstance(browser_cfg.get("camoufox"), dict) else {}
         merged = dict(browser_cfg)
         merged.update(camoufox_cfg or {})
+        merged.setdefault("idle_timeout", _DEFAULT_IDLE_TIMEOUT)
         super().__init__(merged)
         self._camoufox_ctx = None
         self._camoufox_browser_or_context = None

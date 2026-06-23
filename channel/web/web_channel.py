@@ -3561,7 +3561,7 @@ class BrowserConfigHandler:
                 "fingerprint_preset": False,
                 "os": "",
                 "proxy": "",
-                "idle_timeout": 300,
+                "idle_timeout": 10,
             },
             "backend_proxy": "",
         }
@@ -3803,6 +3803,10 @@ class BrowserConfigHandler:
                 camoufox_cfg = cfg.get("camoufox")
                 if isinstance(camoufox_cfg, dict):
                     camoufox_cfg["proxy"] = normalize_proxy_url(camoufox_cfg.get("proxy", ""))
+                    try:
+                        camoufox_cfg["idle_timeout"] = max(0, int(camoufox_cfg.get("idle_timeout", 10)))
+                    except Exception:
+                        camoufox_cfg["idle_timeout"] = 10
             except ValueError as proxy_err:
                 return json.dumps({"status": "error", "message": str(proxy_err)})
 
