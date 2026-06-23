@@ -1207,7 +1207,7 @@ class FeiShuChanel(ChatChannel):
         if not detail:
             return "[引用消息]\n获取失败或无权限读取引用消息\n[/引用消息]"
 
-        message = detail.get("message") if isinstance(detail.get("message"), dict) else detail
+        message = self._normalize_feishu_message_detail(detail)
         msg_type = message.get("message_type") or "unknown"
         raw_content = message.get("content") or "{}"
         try:
@@ -1264,6 +1264,30 @@ class FeiShuChanel(ChatChannel):
         except Exception as e:
             logger.warning(f"[FeiShu] Exception fetching quote message, msg_id={message_id}: {e}")
             return {}
+
+    def _normalize_feishu_message_detail(self, detail: dict) -> dict:
+        """Normalize receive-event and get-message API shapes into one message dict."""
+        if not isinstance(detail, dict):
+            return {}
+
+        message = detail.get("message") if isinstance(detail.get("message"), dict) else detail
+
+        # Receive event shape: {"message_type": "...", "content": "..."}.
+        if message.get("message_type") or message.get("content"):
+            return message
+
+        # Get message API shape: {"msg_type": "...", "body": {"content": "..."}}.
+        body = message.get("body") if isinstance(message.get("body"), dict) else {}
+        content = body.get("content")
+        if content is None and isinstance(message.get("content"), str):
+            content = message.get("content")
+        if content is None:
+            content = "{}"
+
+        normalized = dict(message)
+        normalized["message_type"] = message.get("msg_type") or message.get("message_type") or "unknown"
+        normalized["content"] = content
+        return normalized
 
     def _extract_feishu_message_text(self, msg_type: str, content: dict) -> str:
         if msg_type == "text":
