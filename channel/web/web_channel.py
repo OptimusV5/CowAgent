@@ -2221,6 +2221,140 @@ class ModelsHandler:
     def _is_real_key(value: str) -> bool:
         return bool(value) and value not in ("", "YOUR API KEY", "YOUR_API_KEY")
 
+    _ASR_LEGACY_OPENAI_INSTANCE_ID = "legacy-openai"
+
+    @classmethod
+    def _legacy_asr_openai_instance(cls, local_config: dict) -> dict:
+        api_key = local_config.get("voice_to_text_api_key", "") or ""
+        api_base = local_config.get("voice_to_text_api_base", "") or ""
+        proxy = local_config.get("voice_to_text_proxy", "") or ""
+        model = local_config.get("voice_to_text_model", "") or ""
+        if not any((api_key, api_base, proxy, model)):
+            return {}
+        return {
+            "id": cls._ASR_LEGACY_OPENAI_INSTANCE_ID,
+            "name": "Legacy OpenAI ASR",
+            "api_key": api_key,
+            "api_base": api_base,
+            "model": model,
+            "proxy": proxy,
+            "hotwords": "",
+            "replace_json": "",
+            "response_format": "",
+        }
+
+    @classmethod
+    def _asr_openai_instances_for_runtime(cls, local_config: dict) -> List[dict]:
+        raw = local_config.get("voice_to_text_openai_instances") or []
+        instances = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+        if instances:
+            return instances
+        legacy = cls._legacy_asr_openai_instance(local_config)
+        return [legacy] if legacy else []
+
+    @classmethod
+    def _public_asr_openai_instances(cls, local_config: dict) -> List[dict]:
+        public = []
+        for item in cls._asr_openai_instances_for_runtime(local_config):
+            raw_key = item.get("api_key") or ""
+            raw_proxy = item.get("proxy") or ""
+            public.append({
+                "id": item.get("id") or "",
+                "name": item.get("name") or "",
+                "api_base": item.get("api_base") or "",
+                "model": item.get("model") or "",
+                "hotwords": item.get("hotwords") or "",
+                "replace_json": item.get("replace_json") or "",
+                "response_format": item.get("response_format") or "",
+                "configured": cls._is_real_key(raw_key),
+                "api_key_masked": ConfigHandler._mask_key(raw_key) if cls._is_real_key(raw_key) else "",
+                "api_key_configured": cls._is_real_key(raw_key),
+                "proxy_masked": mask_proxy_url(raw_proxy),
+                "proxy_configured": bool(raw_proxy),
+            })
+        return public
+
+    @classmethod
+    def _selected_asr_openai_instance_id(cls, local_config: dict, instances: List[dict]) -> str:
+        selected_id = (local_config.get("voice_to_text_openai_instance_id") or "").strip()
+        if selected_id and any((item.get("id") or "") == selected_id for item in instances):
+            return selected_id
+        return (instances[0].get("id") or "") if instances else ""
+
+    @classmethod
+    def _sanitize_asr_openai_instances(
+        cls,
+        raw_instances,
+        existing_config: dict,
+    ) -> List[dict]:
+        if raw_instances is None:
+            return []
+        if not isinstance(raw_instances, list):
+            raise ValueError("asr_openai_instances must be a list")
+
+        existing_by_id = {}
+        for item in cls._asr_openai_instances_for_runtime(existing_config):
+            iid = (item.get("id") or "").strip()
+            if iid:
+                existing_by_id[iid] = item
+
+        clean = []
+        seen = set()
+        for raw in raw_instances:
+            if not isinstance(raw, dict):
+                continue
+            iid = (raw.get("id") or "").strip() or uuid.uuid4().hex
+            if iid in seen:
+                iid = uuid.uuid4().hex
+            seen.add(iid)
+            existing = existing_by_id.get(iid, {})
+
+            name = (raw.get("name") or "").strip()
+            api_base = (raw.get("api_base") or "").strip().rstrip("/")
+            model = (raw.get("model") or "").strip()
+            hotwords = (raw.get("hotwords") or "").strip()
+            response_format = (raw.get("response_format") or "").strip()
+            replace_json = (raw.get("replace_json") or "").strip()
+            if replace_json:
+                try:
+                    parsed_replace = json.loads(replace_json)
+                except Exception as e:
+                    raise ValueError("replace_json must be a valid JSON object") from e
+                if not isinstance(parsed_replace, dict):
+                    raise ValueError("replace_json must be a JSON object")
+                replace_json = json.dumps(parsed_replace, ensure_ascii=False, separators=(",", ":"))
+
+            clear_key = bool(raw.get("api_key_clear"))
+            if clear_key:
+                api_key = ""
+            elif isinstance(raw.get("api_key"), str):
+                api_key = raw.get("api_key").strip()
+            else:
+                api_key = existing.get("api_key") or ""
+
+            proxy_present = "proxy" in raw
+            if proxy_present:
+                proxy_value = (raw.get("proxy") or "").strip()
+                proxy_value = normalize_proxy_url(proxy_value) if proxy_value else ""
+            else:
+                proxy_value = existing.get("proxy") or ""
+
+            if not name:
+                name = api_base or model or "OpenAI ASR"
+
+            clean.append({
+                "id": iid,
+                "name": name,
+                "api_key": api_key,
+                "api_base": api_base,
+                "model": model,
+                "proxy": proxy_value,
+                "hotwords": hotwords,
+                "replace_json": replace_json,
+                "response_format": response_format,
+            })
+        return clean
+
     @classmethod
     def _custom_provider_cards(cls, local_config: dict) -> List[dict]:
         """Expand ``custom_providers`` into one card per provider.
@@ -2514,10 +2648,17 @@ class ModelsHandler:
         # the bridge auto-picker would land on (purely a UX hint, NOT
         # persisted). Once the user saves a vendor, we lock onto it.
         explicit = (local_config.get("voice_to_text") or "").strip().lower()
-        asr_openai_key = local_config.get("voice_to_text_api_key", "")
-        asr_openai_base = local_config.get("voice_to_text_api_base", "")
-        asr_proxy = local_config.get("voice_to_text_proxy", "")
-        asr_openai_configured = cls._is_real_key(asr_openai_key)
+        openai_instances = cls._public_asr_openai_instances(local_config)
+        selected_openai_instance_id = cls._selected_asr_openai_instance_id(local_config, openai_instances)
+        selected_openai_instance = next(
+            (item for item in cls._asr_openai_instances_for_runtime(local_config)
+             if (item.get("id") or "") == selected_openai_instance_id),
+            {},
+        )
+        asr_openai_key = selected_openai_instance.get("api_key") or local_config.get("voice_to_text_api_key", "")
+        asr_openai_base = selected_openai_instance.get("api_base") or local_config.get("voice_to_text_api_base", "")
+        asr_proxy = selected_openai_instance.get("proxy") or local_config.get("voice_to_text_proxy", "")
+        asr_openai_configured = any(item.get("api_key_configured") for item in openai_instances) or cls._is_real_key(asr_openai_key)
         openai_meta = ConfigHandler.PROVIDER_MODELS.get("openai") or {}
         suggested = ""
         if not explicit:
@@ -2534,7 +2675,11 @@ class ModelsHandler:
             "editable": True,
             "current_provider": explicit,
             "suggested_provider": suggested,
-            "current_model": (local_config.get("voice_to_text_model") or "") if explicit else "",
+            "current_model": (
+                (selected_openai_instance.get("model") or local_config.get("voice_to_text_model") or "")
+                if explicit == "openai"
+                else ((local_config.get("voice_to_text_model") or "") if explicit else "")
+            ),
             "providers": cls._ASR_PROVIDERS,
             "provider_models": cls._ASR_PROVIDER_MODELS,
             "provider_overrides": {
@@ -2552,6 +2697,8 @@ class ModelsHandler:
             },
             "proxy_masked": mask_proxy_url(asr_proxy),
             "proxy_configured": bool(asr_proxy),
+            "selected_openai_instance_id": selected_openai_instance_id,
+            "openai_instances": openai_instances,
         }
 
     @classmethod
@@ -3326,6 +3473,41 @@ class ModelsHandler:
             local_config["voice_to_text_model"] = model
             file_cfg["voice_to_text_model"] = model
         if provider_id == "openai":
+            if "asr_openai_instances" in data:
+                try:
+                    instances = self._sanitize_asr_openai_instances(
+                        data.get("asr_openai_instances"),
+                        local_config,
+                    )
+                except ValueError as asr_err:
+                    return json.dumps({"status": "error", "message": str(asr_err)})
+                selected_id = (data.get("asr_openai_instance_id") or "").strip()
+                if selected_id and not any((item.get("id") or "") == selected_id for item in instances):
+                    return json.dumps({"status": "error", "message": "selected ASR instance was not found"})
+                if not selected_id and instances:
+                    selected_id = instances[0].get("id") or ""
+                local_config["voice_to_text_openai_instances"] = instances
+                file_cfg["voice_to_text_openai_instances"] = instances
+                local_config["voice_to_text_openai_instance_id"] = selected_id
+                file_cfg["voice_to_text_openai_instance_id"] = selected_id
+
+                selected = next((item for item in instances if (item.get("id") or "") == selected_id), None)
+                if selected:
+                    # Keep flat legacy fields in sync so older code paths,
+                    # config exports and env sync still reflect the active ASR instance.
+                    local_config["voice_to_text_api_base"] = selected.get("api_base") or ""
+                    file_cfg["voice_to_text_api_base"] = selected.get("api_base") or ""
+                    local_config["voice_to_text_api_key"] = selected.get("api_key") or ""
+                    file_cfg["voice_to_text_api_key"] = selected.get("api_key") or ""
+                    local_config["voice_to_text_proxy"] = selected.get("proxy") or ""
+                    file_cfg["voice_to_text_proxy"] = selected.get("proxy") or ""
+                    if selected.get("model"):
+                        local_config["voice_to_text_model"] = selected.get("model")
+                        file_cfg["voice_to_text_model"] = selected.get("model")
+                elif not instances:
+                    local_config["voice_to_text_openai_instance_id"] = ""
+                    file_cfg["voice_to_text_openai_instance_id"] = ""
+
             base_present = "asr_api_base" in data or "voice_to_text_api_base" in data
             if base_present:
                 api_base = (data.get("asr_api_base")

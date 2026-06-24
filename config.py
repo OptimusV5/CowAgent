@@ -127,6 +127,8 @@ available_setting = {
     "voice_to_text_api_key": "",  # optional ASR-specific OpenAI-compatible api key; falls back to open_ai_api_key
     "voice_to_text_api_base": "",  # optional ASR-specific OpenAI-compatible api base; falls back to open_ai_api_base
     "voice_to_text_proxy": "",  # optional ASR-specific proxy; falls back to no proxy
+    "voice_to_text_openai_instance_id": "",  # selected ASR-specific OpenAI-compatible instance id
+    "voice_to_text_openai_instances": [],  # saved ASR-specific OpenAI-compatible instances
     "text_to_voice": "openai",  # TTS engine: openai,baidu,google,azure,xunfei,ali,pytts(offline),elevenlabs,edge(online)
     "text_to_voice_model": "tts-1",
     "tts_voice_id": "alloy",

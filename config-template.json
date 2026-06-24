@@ -22,6 +22,8 @@
   "voice_to_text_api_key": "",
   "voice_to_text_api_base": "",
   "voice_to_text_proxy": "",
+  "voice_to_text_openai_instance_id": "",
+  "voice_to_text_openai_instances": [],
   "text_to_voice": "",
   "voice_reply_voice": false,
   "speech_recognition": true,

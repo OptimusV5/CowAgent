@@ -52,6 +52,15 @@ const I18N = {
         models_capability_asr_desc: '语音转文字',
         models_asr_instance_title: 'ASR 专用 OpenAI 实例',
         models_asr_instance_hint: '填写后语音识别会优先使用这里的地址和 Key；留空则回退到全局 OpenAI 配置。',
+        models_asr_instance_select: '选择实例',
+        models_asr_instance_add: '添加',
+        models_asr_instance_duplicate: '复制',
+        models_asr_instance_delete: '删除',
+        models_asr_instance_name: '实例名称',
+        models_asr_instance_model: '实例模型',
+        models_asr_response_format: '响应格式',
+        models_asr_hotwords: '热词 hotwords',
+        models_asr_replace_json: '替换词 replace_json',
         models_asr_api_base: 'ASR API Base',
         models_asr_api_key: 'ASR API Key',
         models_asr_proxy: '语音识别代理',
@@ -330,6 +339,15 @@ const I18N = {
         models_capability_asr_desc: 'Voice to text',
         models_asr_instance_title: 'ASR OpenAI instance',
         models_asr_instance_hint: 'When set, speech recognition uses this base URL and key first; blank values fall back to global OpenAI config.',
+        models_asr_instance_select: 'Instance',
+        models_asr_instance_add: 'Add',
+        models_asr_instance_duplicate: 'Duplicate',
+        models_asr_instance_delete: 'Delete',
+        models_asr_instance_name: 'Instance Name',
+        models_asr_instance_model: 'Instance Model',
+        models_asr_response_format: 'Response Format',
+        models_asr_hotwords: 'Hotwords',
+        models_asr_replace_json: 'replace_json',
         models_asr_api_base: 'ASR API Base',
         models_asr_api_key: 'ASR API Key',
         models_asr_proxy: 'ASR Proxy',
@@ -5457,6 +5475,8 @@ const MODELS_PROVIDER_LOGO_DARK_INVERT = new Set([
 ]);
 
 let modelsState = { providers: [], capabilities: {} };
+let asrOpenaiInstanceState = [];
+let asrOpenaiSelectedInstanceId = '';
 
 // One-shot: { capabilityId, providerId } stashed before a Models reload,
 // consumed by renderCapabilityBody to preselect a just-configured vendor.
@@ -6277,43 +6297,284 @@ function renderEmbeddingProviderConfig(body, cap) {
     attachMaskedInputUnlock(wrap.querySelector('#cap-embedding-proxy'));
 }
 
+function _newAsrInstanceId() {
+    return `asr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function _asrInstanceLabel(inst) {
+    return (inst && (inst.name || inst.api_base || inst.model || inst.id)) || 'OpenAI ASR';
+}
+
+function _normalizeAsrInstances(cap) {
+    const raw = (cap && Array.isArray(cap.openai_instances)) ? cap.openai_instances : [];
+    const instances = raw.map(item => ({
+        id: item.id || _newAsrInstanceId(),
+        name: item.name || '',
+        api_base: item.api_base || '',
+        api_key_masked: item.api_key_masked || '',
+        api_key_configured: !!item.api_key_configured,
+        api_key_clear: false,
+        model: item.model || '',
+        proxy_masked: item.proxy_masked || '',
+        proxy_configured: !!item.proxy_configured,
+        hotwords: item.hotwords || '',
+        replace_json: item.replace_json || '',
+        response_format: item.response_format || '',
+    }));
+    if (instances.length === 0) {
+        const overrides = (cap && cap.provider_overrides) || {};
+        const openai = overrides.openai || {};
+        instances.push({
+            id: _newAsrInstanceId(),
+            name: '',
+            api_base: openai.api_base || '',
+            api_key_masked: openai.api_key_masked || '',
+            api_key_configured: !!openai.api_key_masked,
+            api_key_clear: false,
+            model: (cap && cap.current_model) || '',
+            proxy_masked: (cap && cap.proxy_masked) || '',
+            proxy_configured: !!(cap && cap.proxy_configured),
+            hotwords: '',
+            replace_json: '',
+            response_format: '',
+        });
+    }
+    return instances;
+}
+
+function _currentAsrInstance(root) {
+    const selected = asrOpenaiSelectedInstanceId || (asrOpenaiInstanceState[0] && asrOpenaiInstanceState[0].id) || '';
+    let inst = asrOpenaiInstanceState.find(item => item.id === selected);
+    if (!inst && asrOpenaiInstanceState.length) inst = asrOpenaiInstanceState[0];
+    if (inst) asrOpenaiSelectedInstanceId = inst.id;
+    return inst || null;
+}
+
+function _captureAsrOpenaiForm(root) {
+    root = root || document;
+    const inst = _currentAsrInstance(root);
+    if (!inst) return;
+    const nameInput = root.querySelector('#cap-asr-instance-name');
+    const baseInput = root.querySelector('#cap-asr-api-base');
+    const keyInput = root.querySelector('#cap-asr-api-key');
+    const proxyInput = root.querySelector('#cap-asr-instance-proxy');
+    const formatInput = root.querySelector('#cap-asr-response-format');
+    const hotwordsInput = root.querySelector('#cap-asr-hotwords');
+    const replaceInput = root.querySelector('#cap-asr-replace-json');
+
+    if (nameInput) inst.name = nameInput.value.trim();
+    if (baseInput) inst.api_base = baseInput.value.trim();
+    const modelDef = MODELS_CAPABILITY_DEFS.find(d => d.id === 'asr');
+    if (modelDef) inst.model = getCapabilityModelValue(modelDef);
+    if (formatInput) inst.response_format = formatInput.value.trim();
+    if (hotwordsInput) inst.hotwords = hotwordsInput.value.trim();
+    if (replaceInput) inst.replace_json = replaceInput.value.trim();
+
+    if (keyInput && keyInput.dataset.masked !== '1') {
+        const value = keyInput.value.trim();
+        if (value) {
+            inst.api_key = value;
+            inst.api_key_clear = false;
+            inst.api_key_masked = '';
+            inst.api_key_configured = true;
+        } else if (keyInput.dataset.hadKey === '1') {
+            delete inst.api_key;
+            inst.api_key_clear = true;
+            inst.api_key_masked = '';
+            inst.api_key_configured = false;
+        }
+    }
+    if (proxyInput && proxyInput.dataset.masked !== '1') {
+        inst.proxy = proxyInput.value.trim();
+        inst.proxy_masked = '';
+        inst.proxy_configured = !!inst.proxy;
+    }
+}
+
+function _renderAsrInstanceFields(root) {
+    root = root || document;
+    const inst = _currentAsrInstance(root);
+    if (!inst) return;
+    const apiBaseDefault = root.querySelector('#cap-asr-openai-instance')?.dataset.apiBaseDefault || 'https://api.openai.com/v1';
+    const apiBasePlaceholder = root.querySelector('#cap-asr-openai-instance')?.dataset.apiBasePlaceholder || apiBaseDefault;
+    const nameInput = root.querySelector('#cap-asr-instance-name');
+    const baseInput = root.querySelector('#cap-asr-api-base');
+    const keyInput = root.querySelector('#cap-asr-api-key');
+    const proxyInput = root.querySelector('#cap-asr-instance-proxy');
+    const formatInput = root.querySelector('#cap-asr-response-format');
+    const hotwordsInput = root.querySelector('#cap-asr-hotwords');
+    const replaceInput = root.querySelector('#cap-asr-replace-json');
+    if (nameInput) nameInput.value = inst.name || '';
+    if (baseInput) {
+        baseInput.value = inst.api_base || '';
+        baseInput.placeholder = apiBasePlaceholder;
+    }
+    if (keyInput) {
+        const maskedKey = inst.api_key_masked || '';
+        keyInput.value = inst.api_key || maskedKey || '';
+        keyInput.dataset.masked = (!inst.api_key && maskedKey) ? '1' : '';
+        keyInput.dataset.hadKey = (inst.api_key_configured || maskedKey) ? '1' : '';
+        keyInput.classList.toggle('cfg-key-masked', keyInput.dataset.masked === '1');
+    }
+    if (proxyInput) {
+        const maskedProxy = inst.proxy_masked || '';
+        const hasRawProxy = Object.prototype.hasOwnProperty.call(inst, 'proxy');
+        proxyInput.value = hasRawProxy ? (inst.proxy || '') : (maskedProxy || '');
+        proxyInput.dataset.masked = (!hasRawProxy && maskedProxy) ? '1' : '';
+        proxyInput.dataset.hadProxy = (inst.proxy_configured || maskedProxy) ? '1' : '';
+        proxyInput.classList.toggle('cfg-key-masked', proxyInput.dataset.masked === '1');
+    }
+    if (formatInput) formatInput.value = inst.response_format || '';
+    if (hotwordsInput) hotwordsInput.value = inst.hotwords || '';
+    if (replaceInput) replaceInput.value = inst.replace_json || '';
+
+    const modelDef = MODELS_CAPABILITY_DEFS.find(d => d.id === 'asr');
+    if (modelDef) {
+        const providerDd = root.querySelector('#cap-asr-provider');
+        const provider = providerDd ? getDropdownValue(providerDd) : 'openai';
+        if (provider === 'openai') {
+            rebuildCapabilityModelDropdown(modelDef, 'openai', inst.model || '', root);
+        }
+    }
+}
+
+function _rebuildAsrInstanceDropdown(root) {
+    root = root || document;
+    const dd = root.querySelector('#cap-asr-instance-select');
+    if (!dd) return;
+    if (!asrOpenaiSelectedInstanceId && asrOpenaiInstanceState.length) {
+        asrOpenaiSelectedInstanceId = asrOpenaiInstanceState[0].id;
+    }
+    const options = asrOpenaiInstanceState.map(inst => ({
+        value: inst.id,
+        label: _asrInstanceLabel(inst),
+        hint: inst.api_base || inst.model || '',
+    }));
+    initDropdown(dd, options, asrOpenaiSelectedInstanceId, (value) => {
+        _captureAsrOpenaiForm(root);
+        asrOpenaiSelectedInstanceId = value;
+        _renderAsrInstanceFields(root);
+    });
+}
+
+function _bindAsrMaskedInput(input) {
+    if (!input) return;
+    const unmask = () => {
+        if (input.dataset.masked === '1') {
+            input.value = '';
+            input.dataset.masked = '';
+            input.classList.remove('cfg-key-masked');
+        }
+    };
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab' || e.key === 'Escape') return;
+        unmask();
+    });
+    input.addEventListener('paste', unmask);
+}
+
 function renderAsrProviderInstance(body, cap) {
     const overrides = (cap && cap.provider_overrides) || {};
     const openai = overrides.openai || {};
-    const maskedKey = openai.api_key_masked || '';
-    const hasKey = !!maskedKey;
-    const apiBase = openai.api_base || '';
     const apiBaseDefault = openai.api_base_default || 'https://api.openai.com/v1';
     const apiBasePlaceholder = openai.api_base_placeholder || apiBaseDefault;
+    asrOpenaiInstanceState = _normalizeAsrInstances(cap);
+    asrOpenaiSelectedInstanceId = (cap && cap.selected_openai_instance_id) || (asrOpenaiInstanceState[0] && asrOpenaiInstanceState[0].id) || '';
     const wrap = document.createElement('div');
     wrap.id = 'cap-asr-openai-instance';
     wrap.className = 'hidden pt-3 border-t border-slate-100 dark:border-white/10 space-y-3';
+    wrap.dataset.apiBaseDefault = apiBaseDefault;
+    wrap.dataset.apiBasePlaceholder = apiBasePlaceholder;
     wrap.innerHTML = `
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <p class="text-sm font-medium text-slate-700 dark:text-slate-200">${t('models_asr_instance_title')}</p>
+                <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">${t('models_asr_instance_hint')}</p>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+                <button type="button" id="cap-asr-instance-add"
+                        class="px-2 py-1 rounded-md text-xs bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors">
+                    ${t('models_asr_instance_add')}
+                </button>
+                <button type="button" id="cap-asr-instance-duplicate"
+                        class="px-2 py-1 rounded-md text-xs bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors">
+                    ${t('models_asr_instance_duplicate')}
+                </button>
+                <button type="button" id="cap-asr-instance-delete"
+                        class="px-2 py-1 rounded-md text-xs text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                    ${t('models_asr_instance_delete')}
+                </button>
+            </div>
+        </div>
         <div>
-            <p class="text-sm font-medium text-slate-700 dark:text-slate-200">${t('models_asr_instance_title')}</p>
-            <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">${t('models_asr_instance_hint')}</p>
+            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_instance_select')}</label>
+            <div id="cap-asr-instance-select" class="cfg-dropdown" tabindex="0">
+                <div class="cfg-dropdown-selected">
+                    <span class="cfg-dropdown-text">--</span>
+                    <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                </div>
+                <div class="cfg-dropdown-menu"></div>
+            </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_instance_name')}</label>
+                <input id="cap-asr-instance-name" type="text" autocomplete="off" spellcheck="false"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 transition-colors"
+                       placeholder="FunASR / Groq / OpenAI" />
+            </div>
             <div>
                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_api_base')}</label>
                 <input id="cap-asr-api-base" type="text" autocomplete="off" spellcheck="false"
                        class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
                               bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
                               focus:outline-none focus:border-primary-500 font-mono transition-colors"
-                       value="${escapeHtml(apiBase)}"
                        placeholder="${escapeHtml(apiBasePlaceholder)}" />
             </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_api_key')}</label>
                 <input id="cap-asr-api-key" type="text" autocomplete="off" data-1p-ignore data-lpignore="true"
                        class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
                               bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
-                              focus:outline-none focus:border-primary-500 font-mono transition-colors ${hasKey ? 'cfg-key-masked' : ''}"
-                       value="${escapeHtml(maskedKey)}"
-                       data-masked="${hasKey ? '1' : ''}"
-                       data-had-key="${hasKey ? '1' : ''}"
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
                        placeholder="sk-..." />
             </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_proxy')}</label>
+                <input id="cap-asr-instance-proxy" type="text" autocomplete="off" spellcheck="false"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                       placeholder="socks5h://127.0.0.1:1080" />
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_response_format')}</label>
+            <input id="cap-asr-response-format" type="text" autocomplete="off" spellcheck="false"
+                   class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                          bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                          focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                   placeholder="verbose_json" />
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_hotwords')}</label>
+            <textarea id="cap-asr-hotwords" rows="2" spellcheck="false"
+                      class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                             bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                             focus:outline-none focus:border-primary-500 font-mono transition-colors resize-y"
+                      placeholder="OpenAI|10,飞书|10,CowAgent|11"></textarea>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_replace_json')}</label>
+            <textarea id="cap-asr-replace-json" rows="2" spellcheck="false"
+                      class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                             bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                             focus:outline-none focus:border-primary-500 font-mono transition-colors resize-y"
+                      placeholder='{"扣agent":"CowAgent","open ai":"OpenAI"}'></textarea>
         </div>
         <p class="text-xs text-slate-400 dark:text-slate-500">
             ${t('models_base_default')}: <span class="font-mono">${escapeHtml(apiBaseDefault)}</span>
@@ -6327,20 +6588,78 @@ function renderAsrProviderInstance(body, cap) {
     }
     renderAsrProxyConfig(body, cap, wrap.nextSibling);
 
-    const keyInput = wrap.querySelector('#cap-asr-api-key');
-    if (!keyInput) return;
-    const unmask = () => {
-        if (keyInput.dataset.masked === '1') {
-            keyInput.value = '';
-            keyInput.dataset.masked = '';
-            keyInput.classList.remove('cfg-key-masked');
-        }
-    };
-    keyInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab' || e.key === 'Escape') return;
-        unmask();
+    _rebuildAsrInstanceDropdown(body);
+    _renderAsrInstanceFields(body);
+    _bindAsrMaskedInput(wrap.querySelector('#cap-asr-api-key'));
+    _bindAsrMaskedInput(wrap.querySelector('#cap-asr-instance-proxy'));
+
+    wrap.querySelector('#cap-asr-instance-add')?.addEventListener('click', () => {
+        _captureAsrOpenaiForm(body);
+        const inst = {
+            id: _newAsrInstanceId(),
+            name: '',
+            api_base: '',
+            api_key_masked: '',
+            api_key_configured: false,
+            api_key_clear: false,
+            model: '',
+            proxy_masked: '',
+            proxy_configured: false,
+            hotwords: '',
+            replace_json: '',
+            response_format: '',
+        };
+        asrOpenaiInstanceState.push(inst);
+        asrOpenaiSelectedInstanceId = inst.id;
+        _rebuildAsrInstanceDropdown(body);
+        _renderAsrInstanceFields(body);
     });
-    keyInput.addEventListener('paste', unmask);
+    wrap.querySelector('#cap-asr-instance-duplicate')?.addEventListener('click', () => {
+        _captureAsrOpenaiForm(body);
+        const current = _currentAsrInstance(body);
+        if (!current) return;
+        const typedKey = current.api_key || '';
+        const copy = Object.assign({}, current, {
+            id: _newAsrInstanceId(),
+            name: current.name ? `${current.name} copy` : '',
+            api_key: typedKey,
+            api_key_clear: false,
+            api_key_masked: typedKey ? '' : '',
+            api_key_configured: !!typedKey,
+            proxy_masked: Object.prototype.hasOwnProperty.call(current, 'proxy') ? '' : '',
+            proxy_configured: !!current.proxy,
+        });
+        if (!copy.api_key) delete copy.api_key;
+        asrOpenaiInstanceState.push(copy);
+        asrOpenaiSelectedInstanceId = copy.id;
+        _rebuildAsrInstanceDropdown(body);
+        _renderAsrInstanceFields(body);
+    });
+    wrap.querySelector('#cap-asr-instance-delete')?.addEventListener('click', () => {
+        if (asrOpenaiInstanceState.length <= 1) {
+            const current = _currentAsrInstance(body);
+            if (!current) return;
+            Object.assign(current, {
+                name: '',
+                api_base: '',
+                api_key_masked: '',
+                api_key_configured: false,
+                api_key_clear: true,
+                model: '',
+                proxy: '',
+                proxy_masked: '',
+                proxy_configured: false,
+                hotwords: '',
+                replace_json: '',
+                response_format: '',
+            });
+        } else {
+            asrOpenaiInstanceState = asrOpenaiInstanceState.filter(item => item.id !== asrOpenaiSelectedInstanceId);
+            asrOpenaiSelectedInstanceId = (asrOpenaiInstanceState[0] && asrOpenaiInstanceState[0].id) || '';
+        }
+        _rebuildAsrInstanceDropdown(body);
+        _renderAsrInstanceFields(body);
+    });
 
 }
 
@@ -6383,8 +6702,12 @@ function renderAsrProxyConfig(body, cap, beforeNode) {
 function updateAsrProviderInstanceVisibility(providerId, scope) {
     const root = scope || document;
     const wrap = root.querySelector('#cap-asr-openai-instance');
-    if (!wrap) return;
-    wrap.classList.toggle('hidden', providerId !== 'openai');
+    const proxyWrap = root.querySelector('#cap-asr-proxy-wrap');
+    if (wrap) wrap.classList.toggle('hidden', providerId !== 'openai');
+    if (proxyWrap) proxyWrap.classList.toggle('hidden', providerId === 'openai');
+    if (providerId === 'openai') {
+        _renderAsrInstanceFields(root);
+    }
 }
 
 function updateEmbeddingProviderConfig(providerId, scope) {
@@ -6859,22 +7182,32 @@ function getCapabilityModelValue(def) {
 
 function getAsrProviderInstancePayload(provider) {
     const payload = {};
-    const baseInput = document.getElementById('cap-asr-api-base');
-    const keyInput = document.getElementById('cap-asr-api-key');
     const proxyInput = document.getElementById('cap-asr-proxy');
-    if (provider === 'openai' && baseInput) {
-        payload.asr_api_base = baseInput.value.trim();
-    }
-    if (provider === 'openai' && keyInput && keyInput.dataset.masked !== '1') {
-        const value = keyInput.value.trim();
-        if (value) {
-            payload.asr_api_key = value;
-        } else if (keyInput.dataset.hadKey === '1') {
-            payload.asr_api_key_clear = true;
+    if (provider === 'openai') {
+        _captureAsrOpenaiForm(document);
+        payload.asr_openai_instance_id = asrOpenaiSelectedInstanceId || '';
+        payload.asr_openai_instances = asrOpenaiInstanceState.map(inst => {
+            const out = {
+                id: inst.id,
+                name: inst.name || '',
+                api_base: inst.api_base || '',
+                model: inst.model || '',
+                proxy: Object.prototype.hasOwnProperty.call(inst, 'proxy') ? (inst.proxy || '') : undefined,
+                hotwords: inst.hotwords || '',
+                replace_json: inst.replace_json || '',
+                response_format: inst.response_format || '',
+            };
+            if (inst.api_key) out.api_key = inst.api_key;
+            if (inst.api_key_clear) out.api_key_clear = true;
+            Object.keys(out).forEach(key => {
+                if (out[key] === undefined) delete out[key];
+            });
+            return out;
+        });
+    } else {
+        if (proxyInput && proxyInput.dataset.masked !== '1') {
+            payload.asr_proxy = proxyInput.value.trim();
         }
-    }
-    if (proxyInput && proxyInput.dataset.masked !== '1') {
-        payload.asr_proxy = proxyInput.value.trim();
     }
     return payload;
 }
@@ -6990,6 +7323,8 @@ function _persistCapability(capId, provider, model, onAfterSuccess, extras) {
     if (extras && extras.asr_api_key !== undefined) payload.asr_api_key = extras.asr_api_key;
     if (extras && extras.asr_api_key_clear !== undefined) payload.asr_api_key_clear = extras.asr_api_key_clear;
     if (extras && extras.asr_proxy !== undefined) payload.asr_proxy = extras.asr_proxy;
+    if (extras && extras.asr_openai_instance_id !== undefined) payload.asr_openai_instance_id = extras.asr_openai_instance_id;
+    if (extras && extras.asr_openai_instances !== undefined) payload.asr_openai_instances = extras.asr_openai_instances;
     if (extras && extras.embedding_provider_type !== undefined) payload.embedding_provider_type = extras.embedding_provider_type;
     if (extras && extras.embedding_api_base !== undefined) payload.embedding_api_base = extras.embedding_api_base;
     if (extras && extras.embedding_api_key !== undefined) payload.embedding_api_key = extras.embedding_api_key;
