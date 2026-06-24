@@ -6361,11 +6361,11 @@ function _captureAsrOpenaiForm(root) {
     const formatInput = root.querySelector('#cap-asr-response-format');
     const hotwordsInput = root.querySelector('#cap-asr-hotwords');
     const replaceInput = root.querySelector('#cap-asr-replace-json');
+    const instanceModelInput = root.querySelector('#cap-asr-instance-model');
 
     if (nameInput) inst.name = nameInput.value.trim();
     if (baseInput) inst.api_base = baseInput.value.trim();
-    const modelDef = MODELS_CAPABILITY_DEFS.find(d => d.id === 'asr');
-    if (modelDef) inst.model = getCapabilityModelValue(modelDef);
+    if (instanceModelInput) inst.model = instanceModelInput.value.trim();
     if (formatInput) inst.response_format = formatInput.value.trim();
     if (hotwordsInput) inst.hotwords = hotwordsInput.value.trim();
     if (replaceInput) inst.replace_json = replaceInput.value.trim();
@@ -6404,11 +6404,13 @@ function _renderAsrInstanceFields(root) {
     const formatInput = root.querySelector('#cap-asr-response-format');
     const hotwordsInput = root.querySelector('#cap-asr-hotwords');
     const replaceInput = root.querySelector('#cap-asr-replace-json');
+    const instanceModelInput = root.querySelector('#cap-asr-instance-model');
     if (nameInput) nameInput.value = inst.name || '';
     if (baseInput) {
         baseInput.value = inst.api_base || '';
         baseInput.placeholder = apiBasePlaceholder;
     }
+    if (instanceModelInput) instanceModelInput.value = inst.model || '';
     if (keyInput) {
         const maskedKey = inst.api_key_masked || '';
         keyInput.value = inst.api_key || maskedKey || '';
@@ -6427,15 +6429,6 @@ function _renderAsrInstanceFields(root) {
     if (formatInput) formatInput.value = inst.response_format || '';
     if (hotwordsInput) hotwordsInput.value = inst.hotwords || '';
     if (replaceInput) replaceInput.value = inst.replace_json || '';
-
-    const modelDef = MODELS_CAPABILITY_DEFS.find(d => d.id === 'asr');
-    if (modelDef) {
-        const providerDd = root.querySelector('#cap-asr-provider');
-        const provider = providerDd ? getDropdownValue(providerDd) : 'openai';
-        if (provider === 'openai') {
-            rebuildCapabilityModelDropdown(modelDef, 'openai', inst.model || '', root);
-        }
-    }
 }
 
 function _rebuildAsrInstanceDropdown(root) {
@@ -6526,6 +6519,16 @@ function renderAsrProviderInstance(body, cap) {
                        placeholder="FunASR / Groq / OpenAI" />
             </div>
             <div>
+                <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_instance_model')}</label>
+                <input id="cap-asr-instance-model" type="text" autocomplete="off" spellcheck="false"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                       placeholder="gpt-4o-mini-transcribe / whisper-large-v3-turbo" />
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_api_base')}</label>
                 <input id="cap-asr-api-base" type="text" autocomplete="off" spellcheck="false"
                        class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
@@ -6533,8 +6536,6 @@ function renderAsrProviderInstance(body, cap) {
                               focus:outline-none focus:border-primary-500 font-mono transition-colors"
                        placeholder="${escapeHtml(apiBasePlaceholder)}" />
             </div>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_asr_api_key')}</label>
                 <input id="cap-asr-api-key" type="text" autocomplete="off" data-1p-ignore data-lpignore="true"
@@ -6703,8 +6704,10 @@ function updateAsrProviderInstanceVisibility(providerId, scope) {
     const root = scope || document;
     const wrap = root.querySelector('#cap-asr-openai-instance');
     const proxyWrap = root.querySelector('#cap-asr-proxy-wrap');
+    const modelWrap = root.querySelector('#cap-asr-model-wrap');
     if (wrap) wrap.classList.toggle('hidden', providerId !== 'openai');
     if (proxyWrap) proxyWrap.classList.toggle('hidden', providerId === 'openai');
+    if (modelWrap) modelWrap.classList.toggle('hidden', providerId === 'openai');
     if (providerId === 'openai') {
         _renderAsrInstanceFields(root);
     }
@@ -7147,10 +7150,11 @@ function onCapabilityProviderChange(def, providerId, scope) {
     if (def.needsModel) {
         // Empty sentinel hides the model picker (capability is in auto mode).
         const isAuto = providerId === '' && capabilitySupportsAuto(def.id);
-        if (!isAuto) {
+        const useInstanceModel = def.id === 'asr' && providerId === 'openai';
+        if (!isAuto && !useInstanceModel) {
             rebuildCapabilityModelDropdown(def, providerId, '', scope);
         }
-        setCapabilityModelPickerVisible(def, !isAuto, scope);
+        setCapabilityModelPickerVisible(def, !isAuto && !useInstanceModel, scope);
     }
     if (def.id === 'tts') {
         rebuildCapabilityVoiceDropdown(providerId, '', scope);
@@ -7250,7 +7254,10 @@ function saveCapability(capId) {
     // hidden and any value left in it is stale; persist an empty model so
     // the backend treats this as "fall back to the runtime chain".
     const isAuto = provider === '' && capabilitySupportsAuto(capId);
-    const model = isAuto ? '' : getCapabilityModelValue(def);
+    let model = isAuto ? '' : getCapabilityModelValue(def);
+    if (capId === 'asr' && provider === 'openai') {
+        model = '';
+    }
     // TTS carries an extra voice timbre (supports free-text custom ids).
     let voice = '';
     if (capId === 'tts' && !isAuto) {

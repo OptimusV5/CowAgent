@@ -12,7 +12,8 @@ class AudioTranscribe(BaseTool):
     description: str = (
         "Transcribe a local audio or voice file to text using CowAgent's configured speech recognition provider. "
         "Use this whenever the user asks to convert, transcribe, recognize, or understand an audio/voice file. "
-        "Do not inspect env_config or call OpenAI/curl audio APIs yourself; this tool uses the Models page ASR configuration."
+        "Do not inspect env_config or call OpenAI/curl audio APIs yourself; this tool uses the Models page ASR configuration. "
+        "When the conversation provides temporary domain terms, names, or correction rules, pass hotwords and replace_json for this call only."
     )
     params: dict = {
         "type": "object",
@@ -20,6 +21,27 @@ class AudioTranscribe(BaseTool):
             "file_path": {
                 "type": "string",
                 "description": "Local path to the uploaded audio/voice file to transcribe.",
+            },
+            "instance_id": {
+                "type": "string",
+                "description": "Optional ASR OpenAI-compatible instance id for this transcription only. Leave empty to use the selected ASR instance.",
+            },
+            "model": {
+                "type": "string",
+                "description": "Optional ASR model override for this transcription only.",
+            },
+            "response_format": {
+                "type": "string",
+                "description": "Optional response_format override, e.g. verbose_json. Omit when not needed.",
+            },
+            "hotwords": {
+                "type": "string",
+                "description": "Optional comma-separated hotwords for this transcription only, e.g. OpenAI|10,飞书|10,CowAgent|11.",
+            },
+            "replace_json": {
+                "type": "object",
+                "description": "Optional post-processing replacement map for this transcription only, e.g. {\"扣agent\":\"CowAgent\"}.",
+                "additionalProperties": {"type": "string"},
             },
         },
         "required": ["file_path"],
@@ -35,7 +57,18 @@ class AudioTranscribe(BaseTool):
 
         from bridge.bridge import Bridge
 
-        reply = Bridge().fetch_voice_to_text(file_path)
+        options = {}
+        for key in ("instance_id", "model", "response_format", "hotwords"):
+            value = args.get(key)
+            if isinstance(value, str) and value.strip():
+                options[key] = value.strip()
+        replace_json = args.get("replace_json")
+        if isinstance(replace_json, dict) and replace_json:
+            options["replace_json"] = {str(k): str(v) for k, v in replace_json.items()}
+        elif isinstance(replace_json, str) and replace_json.strip():
+            options["replace_json"] = replace_json.strip()
+
+        reply = Bridge().fetch_voice_to_text(file_path, options=options or None)
         if reply is None:
             return ToolResult.fail("Error: ASR returned no result")
         if reply.type == ReplyType.TEXT:

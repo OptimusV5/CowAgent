@@ -150,8 +150,14 @@ class Bridge(object):
     def fetch_reply_content(self, query, context: Context) -> Reply:
         return self.get_bot("chat").reply(query, context)
 
-    def fetch_voice_to_text(self, voiceFile) -> Reply:
-        return self.get_bot("voice_to_text").voiceToText(voiceFile)
+    def fetch_voice_to_text(self, voiceFile, options=None) -> Reply:
+        bot = self.get_bot("voice_to_text")
+        if options:
+            try:
+                return bot.voiceToText(voiceFile, options=options)
+            except TypeError:
+                return bot.voiceToText(voiceFile)
+        return bot.voiceToText(voiceFile)
 
     def fetch_text_to_voice(self, text) -> Reply:
         return self.get_bot("text_to_voice").textToVoice(text)

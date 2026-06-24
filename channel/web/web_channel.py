@@ -3501,9 +3501,8 @@ class ModelsHandler:
                     file_cfg["voice_to_text_api_key"] = selected.get("api_key") or ""
                     local_config["voice_to_text_proxy"] = selected.get("proxy") or ""
                     file_cfg["voice_to_text_proxy"] = selected.get("proxy") or ""
-                    if selected.get("model"):
-                        local_config["voice_to_text_model"] = selected.get("model")
-                        file_cfg["voice_to_text_model"] = selected.get("model")
+                    local_config["voice_to_text_model"] = selected.get("model") or ""
+                    file_cfg["voice_to_text_model"] = selected.get("model") or ""
                 elif not instances:
                     local_config["voice_to_text_openai_instance_id"] = ""
                     file_cfg["voice_to_text_openai_instance_id"] = ""

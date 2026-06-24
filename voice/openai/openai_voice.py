@@ -26,18 +26,52 @@ def _saved_openai_instances():
     return [item for item in instances if isinstance(item, dict)]
 
 
-def _selected_openai_instance():
+def _selected_openai_instance(instance_id=""):
     instances = _saved_openai_instances()
-    selected_id = (conf().get("voice_to_text_openai_instance_id") or "").strip()
+    explicit_id = (instance_id or "").strip()
+    selected_id = explicit_id or (conf().get("voice_to_text_openai_instance_id") or "").strip()
     if selected_id:
         for item in instances:
             if (item.get("id") or "").strip() == selected_id:
                 return item
+        if explicit_id:
+            raise ValueError(f"ASR OpenAI instance not found: {explicit_id}")
     return instances[0] if instances else None
 
 
-def _openai_asr_runtime_config():
-    instance = _selected_openai_instance()
+def _stringify_replace_json(value):
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("replace_json must be a JSON object")
+    return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+
+
+def _normalize_asr_options(options):
+    if not isinstance(options, dict):
+        return {}
+    normalized = {}
+    for key in ("instance_id", "model", "response_format", "hotwords"):
+        value = options.get(key)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value:
+            normalized[key] = value
+    if "replace_json" in options and options.get("replace_json") not in (None, ""):
+        normalized["replace_json"] = _stringify_replace_json(options.get("replace_json"))
+    return normalized
+
+
+def _openai_asr_runtime_config(options=None):
+    overrides = _normalize_asr_options(options)
+    instance = _selected_openai_instance(overrides.get("instance_id", ""))
     if instance:
         api_key = (instance.get("api_key") or "").strip() or conf().get("voice_to_text_api_key") or conf().get("open_ai_api_key") or ""
         api_base = (
@@ -46,13 +80,13 @@ def _openai_asr_runtime_config():
             or _normalize_api_base(conf().get("open_ai_api_base"))
             or "https://api.openai.com/v1"
         )
-        model = (instance.get("model") or "").strip() or conf().get("voice_to_text_model") or DEFAULT_ASR_MODEL
+        model = overrides.get("model") or (instance.get("model") or "").strip() or conf().get("voice_to_text_model") or DEFAULT_ASR_MODEL
         proxy_value = (instance.get("proxy") or "").strip()
         proxies = proxy_dict(proxy_value) if proxy_value else None
         data = {"model": model}
-        response_format = (instance.get("response_format") or "").strip()
-        hotwords = (instance.get("hotwords") or "").strip()
-        replace_json = (instance.get("replace_json") or "").strip()
+        response_format = overrides.get("response_format") or (instance.get("response_format") or "").strip()
+        hotwords = overrides.get("hotwords") or (instance.get("hotwords") or "").strip()
+        replace_json = overrides.get("replace_json") or (instance.get("replace_json") or "").strip()
         if response_format:
             data["response_format"] = response_format
         if hotwords:
@@ -73,12 +107,16 @@ def _openai_asr_runtime_config():
         or _normalize_api_base(conf().get("open_ai_api_base"))
         or "https://api.openai.com/v1"
     )
+    data = {
+        "model": overrides.get("model") or conf().get("voice_to_text_model") or DEFAULT_ASR_MODEL,
+    }
+    for key in ("response_format", "hotwords", "replace_json"):
+        if overrides.get(key):
+            data[key] = overrides[key]
     return {
         "api_key": api_key,
         "api_base": api_base,
-        "data": {
-            "model": conf().get("voice_to_text_model") or DEFAULT_ASR_MODEL,
-        },
+        "data": data,
         "proxies": config_proxy_dict("voice_to_text_proxy"),
         "instance_id": "",
     }
@@ -90,10 +128,10 @@ class OpenaiVoice(Voice):
         # `requests`, so it does not need a global SDK to be configured.
         pass
 
-    def voiceToText(self, voice_file):
+    def voiceToText(self, voice_file, options=None):
         logger.debug("[Openai] voice file name={}".format(voice_file))
         try:
-            runtime = _openai_asr_runtime_config()
+            runtime = _openai_asr_runtime_config(options=options)
             api_key = runtime["api_key"]
             api_base = runtime["api_base"]
             url = f'{api_base}/audio/transcriptions'
