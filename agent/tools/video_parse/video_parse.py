@@ -8,7 +8,7 @@ import subprocess
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -81,9 +81,21 @@ MIME_ALIASES = {
     "video/x-ms-wmv": "video/wmv",
 }
 
+_YOUTUBE_HOSTS = frozenset({
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "www.music.youtube.com",
+})
+_YOUTUBE_SHORT_HOSTS = frozenset({"youtu.be", "www.youtu.be"})
+_YOUTUBE_VIDEO_ID_RE = re.compile(r"^[\w-]{11}$")
+
 
 class VideoParseError(Exception):
-    pass
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class VideoParseTool(BaseTool):
@@ -94,8 +106,10 @@ class VideoParseTool(BaseTool):
         "Analyze, summarize, or extract information from a video link or uploaded/local video file. "
         "Use this whenever the user sends a video URL or video file and asks to understand, summarize, "
         "parse, describe, transcribe, or extract timeline/content from the video. "
-        "For URLs, the tool downloads with yt-dlp, merges split audio/video with ffmpeg stream copy, "
-        "uploads the final video to Gemini Files API, and returns JSON/text analysis."
+        "For YouTube URLs with Gemini, the tool first tries direct YouTube URL analysis via Gemini "
+        "generateContent (no local download). If that fails and fallback is enabled, it downloads "
+        "with yt-dlp, merges split audio/video with ffmpeg stream copy, uploads the final video to "
+        "Gemini Files API, and returns JSON/text analysis. Non-YouTube URLs always use the download path."
     )
 
     params: dict = {
@@ -140,11 +154,52 @@ class VideoParseTool(BaseTool):
         local_source_path = None
         remote_file_names: List[str] = []
         success = False
+        youtube_direct_error: Optional[str] = None
+        youtube_direct_attempted = False
 
         try:
             url, file_path = self._resolve_input(args)
             self._validate_api_key(runtime)
-            self._validate_commands(url_required=bool(url))
+
+            if url and self._should_use_youtube_direct(url, runtime):
+                youtube_direct_attempted = True
+                try:
+                    self.report_progress("正在通过 YouTube 直链调用 Gemini 解析...")
+                    result = self._analyze_youtube_url_direct(url, runtime, runtime["prompt"])
+                    meta = result.setdefault("_meta", {})
+                    meta.update({
+                        "model": runtime["model"],
+                        "source_url": url,
+                        "youtube_direct_attempted": True,
+                        "fallback_used": False,
+                    })
+                    success = True
+                    return ToolResult.success(result)
+                except Exception as e:
+                    youtube_direct_error = str(e)
+                    if not self._should_youtube_direct_fallback(e, runtime):
+                        logger.warning(
+                            f"[VideoParse] YouTube direct analysis failed (non-recoverable): {e}"
+                        )
+                        diagnostics = {
+                            "_meta": {
+                                "mode": "youtube_url_direct",
+                                "model": runtime["model"],
+                                "source_url": url,
+                                "youtube_direct_attempted": True,
+                                "fallback_used": False,
+                                "youtube_direct_error": youtube_direct_error,
+                            }
+                        }
+                        return ToolResult.fail(f"Error: {youtube_direct_error}", ext_data=diagnostics)
+                    logger.warning(
+                        f"[VideoParse] YouTube direct analysis failed, falling back to download: {e}"
+                    )
+
+            if url:
+                self._validate_commands(url_required=True)
+            else:
+                self._validate_commands(url_required=False)
             work_dir = self._make_work_dir(runtime)
 
             if url:
@@ -194,6 +249,13 @@ class VideoParseTool(BaseTool):
                 "source_file_deleted": bool(local_source_path and runtime["delete_source_on_success"]),
                 "remote_file_deleted": bool(remote_file_names and runtime["delete_remote_file"]),
             })
+            if youtube_direct_attempted:
+                meta["youtube_direct_attempted"] = True
+                meta["fallback_used"] = bool(youtube_direct_error)
+                if url:
+                    meta["source_url"] = url
+                if youtube_direct_error:
+                    meta["youtube_direct_error"] = youtube_direct_error
             if runtime["keep_temp"]:
                 meta["temp_dir"] = work_dir
             success = True
@@ -268,6 +330,8 @@ class VideoParseTool(BaseTool):
             "cookie_file": str(cfg.get("cookie_file") or "").strip(),
             "proxy": str(cfg.get("proxy") or "").strip(),
             "yt_dlp_proxy_sites": normalize_yt_dlp_proxy_sites(cfg.get("yt_dlp_proxy_sites")),
+            "youtube_direct_enabled": self._bool_value(cfg.get("youtube_direct_enabled", True)),
+            "youtube_direct_fallback": self._bool_value(cfg.get("youtube_direct_fallback", True)),
         }
 
     def _latest_tool_config(self) -> Dict[str, Any]:
@@ -330,6 +394,138 @@ class VideoParseTool(BaseTool):
                     ", ".join(missing)
                 )
             )
+
+    def _is_youtube_url(self, url: str) -> bool:
+        parsed = urlparse((url or "").strip())
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return False
+        if host == "googlevideo.com" or host.endswith(".googlevideo.com"):
+            return False
+
+        path = parsed.path or ""
+
+        if host in _YOUTUBE_SHORT_HOSTS:
+            video_id = path.strip("/").split("/")[0]
+            return bool(video_id and _YOUTUBE_VIDEO_ID_RE.match(video_id))
+
+        if host not in _YOUTUBE_HOSTS:
+            return False
+
+        if path.startswith("/playlist"):
+            return False
+
+        if path.startswith("/watch"):
+            return self._youtube_watch_has_video_id(parsed)
+
+        for prefix in ("/shorts/", "/embed/", "/live/", "/v/"):
+            if path.startswith(prefix):
+                return bool(self._youtube_path_video_id(path, prefix))
+
+        return False
+
+    def _youtube_watch_has_video_id(self, parsed) -> bool:
+        qs = parse_qs(parsed.query or "")
+        video_ids = qs.get("v") or []
+        video_id = str(video_ids[0]).strip() if video_ids else ""
+        return bool(video_id and _YOUTUBE_VIDEO_ID_RE.match(video_id))
+
+    def _youtube_path_video_id(self, path: str, prefix: str) -> Optional[str]:
+        remainder = path[len(prefix):]
+        video_id = remainder.split("/")[0].split("?")[0]
+        if video_id and _YOUTUBE_VIDEO_ID_RE.match(video_id):
+            return video_id
+        return None
+
+    def _should_use_youtube_direct(self, url: str, runtime: Dict[str, Any]) -> bool:
+        if not runtime.get("youtube_direct_enabled", True):
+            return False
+        if not self._is_youtube_url(url):
+            return False
+        if not runtime.get("api_key"):
+            return False
+        return True
+
+    def _should_youtube_direct_fallback(self, error: Exception, runtime: Dict[str, Any]) -> bool:
+        if not runtime.get("youtube_direct_fallback", True):
+            return False
+        # Default to fallback; only refuse for clearly non-recoverable errors so that
+        # transient/network/parse failures still go through the download path.
+        return not self._is_youtube_direct_non_fallbackable(error)
+
+    def _is_youtube_direct_non_fallbackable(self, error: Exception) -> bool:
+        # Genuine auth/quota/model errors will not be fixed by downloading first.
+        # Note: HTTP 403/PERMISSION_DENIED is treated as recoverable because
+        # age/region-gated videos may still succeed via local yt-dlp cookies/proxy.
+        status_code = getattr(error, "status_code", None)
+        if status_code in (401, 429):
+            return True
+        message = str(error).lower()
+        non_fallback_patterns = (
+            "api key not valid",
+            "api_key_invalid",
+            "invalid api key",
+            "quota",
+            "resource exhausted",
+            "unauthenticated",
+            "authentication credentials",
+            "request had invalid authentication",
+        )
+        if any(pattern in message for pattern in non_fallback_patterns):
+            return True
+        if "model" in message and ("not found" in message or "does not exist" in message):
+            return True
+        return False
+
+    def _analyze_youtube_url_direct(
+        self,
+        url: str,
+        runtime: Dict[str, Any],
+        prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        response_data = self._generate_content_youtube_url(url, runtime, prompt=prompt)
+        raw_text = self._extract_candidate_text(response_data)
+        parsed = self._parse_json_text(raw_text)
+        result = parsed if isinstance(parsed, dict) else {}
+        result.setdefault("raw_text", raw_text)
+        result["_meta"] = {
+            "mode": "youtube_url_direct",
+            "usage": response_data.get("usageMetadata") or {},
+        }
+        return result
+
+    def _generate_content_youtube_url(
+        self,
+        youtube_url: str,
+        runtime: Dict[str, Any],
+        prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        url = "{}/v1beta/models/{}:generateContent".format(runtime["api_base"], runtime["model"])
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"file_data": {"file_uri": youtube_url}},
+                        {"text": prompt if prompt is not None else runtime["prompt"]},
+                    ]
+                }
+            ]
+        }
+        if runtime.get("prefer_json"):
+            payload["generationConfig"] = {"response_mime_type": "application/json"}
+
+        response = requests.post(
+            url,
+            headers={
+                "x-goog-api-key": runtime["api_key"],
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=runtime["gemini_timeout"],
+            proxies=proxy_dict(runtime.get("proxy") or ""),
+        )
+        self._raise_for_gemini_error(response, "generate content from YouTube URL")
+        return response.json()
 
     def _make_work_dir(self, runtime: Dict[str, Any]) -> str:
         base = runtime.get("temp_dir") or os.path.join(self.cwd, "tmp", "video_parse")
@@ -1101,7 +1297,7 @@ class VideoParseTool(BaseTool):
 
     def _cleanup_after_success(
         self,
-        work_dir: str,
+        work_dir: Optional[str],
         local_source_path: Optional[str],
         file_names: List[str],
         runtime: Dict[str, Any],
@@ -1112,7 +1308,7 @@ class VideoParseTool(BaseTool):
         if local_source_path and runtime.get("delete_source_on_success"):
             self._remove_file(local_source_path)
 
-        if not runtime.get("keep_temp"):
+        if work_dir and not runtime.get("keep_temp"):
             self._remove_dir(work_dir)
 
     def _delete_remote_files(self, file_names: List[str], runtime: Dict[str, Any]) -> None:
@@ -1161,7 +1357,10 @@ class VideoParseTool(BaseTool):
             message = self._get_nested(data, "error", "message") or message
         except Exception:
             pass
-        raise VideoParseError(f"Gemini API failed to {action}: HTTP {response.status_code}: {message}")
+        raise VideoParseError(
+            f"Gemini API failed to {action}: HTTP {response.status_code}: {message}",
+            status_code=response.status_code,
+        )
 
     def _file_field(self, data: Dict[str, Any], key: str) -> Any:
         value = self._get_nested(data, "file", key)

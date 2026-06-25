@@ -4038,6 +4038,8 @@ class VideoParseConfigHandler:
             "cookie_file": "",
             "proxy": "",
             "yt_dlp_proxy_sites": [],
+            "youtube_direct_enabled": True,
+            "youtube_direct_fallback": True,
         }
 
     @classmethod

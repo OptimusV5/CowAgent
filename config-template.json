@@ -66,6 +66,8 @@
       "cookie_file": "",
       "proxy": "",
       "yt_dlp_proxy_sites": [],
+      "youtube_direct_enabled": true,
+      "youtube_direct_fallback": true,
       "keep_temp": false,
       "delete_source_on_success": true,
       "delete_remote_file": true
