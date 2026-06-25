@@ -56,6 +56,7 @@
     "browser": {
       "engine": "playwright",
       "backend_proxy": "",
+      "proxy_default": false,
       "camoufox": {
         "idle_timeout": 10
       }

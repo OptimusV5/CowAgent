@@ -749,8 +749,20 @@
                                                                   bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
                                                                   focus:outline-none focus:border-primary-500 font-mono transition-colors"
                                                            placeholder="socks5h://127.0.0.1:1080">
-                                                    <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500">用于 Camoufox 浏览器页面访问外网。</p>
+                                                    <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_camoufox_proxy_hint">用于 Camoufox 浏览器页面访问外网。默认不启用，需 agent 传 use_proxy 或开启下方默认启用。</p>
                                                 </div>
+                                            </div>
+                                            <div class="flex items-center justify-between sm:justify-start sm:gap-3">
+                                                <div>
+                                                    <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_browser_proxy_default">默认启用页面代理</span>
+                                                    <p class="mt-1 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_proxy_default_hint">关闭时，仅在 agent 调用 browser 工具并传 use_proxy: true 时启用已保存的 Camoufox 页面代理。</p>
+                                                </div>
+                                                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                                                    <input id="cfg-browser-proxy-default" type="checkbox" class="sr-only peer">
+                                                    <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                                after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                                after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                                </label>
                                             </div>
                                             <div>
                                                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">Idle Timeout (s)</label>

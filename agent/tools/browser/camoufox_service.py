@@ -172,6 +172,13 @@ class CamoufoxBrowserService(BrowserService):
                 raise
 
     def _build_camoufox_options(self, launch_args: List[str], viewport: Dict[str, int]) -> Dict[str, Any]:
+        """Build Camoufox launch kwargs.
+
+        ``proxy`` here is the effective browser-page proxy (page traffic), already
+        resolved from ``tools.browser.camoufox.proxy`` plus ``proxy_default`` /
+        per-call ``use_proxy``. It is unrelated to ``backend_proxy``, which only
+        proxies CowAgent's HTTP calls to the Camofox REST API.
+        """
         persistent = self._launch_mode == "persistent"
         raw_proxy = str(self._config.get("proxy") or "").strip()
         proxy = _parse_proxy(raw_proxy)

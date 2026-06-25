@@ -192,6 +192,7 @@ Example config:
   "tools": {
     "browser": {
       "engine": "camoufox",
+      "proxy_default": false,
       "camoufox": {
         "persistent": true,
         "user_data_dir": "~/.cow/camoufox_profile",
@@ -205,5 +206,9 @@ Example config:
   }
 }
 ```
+
+`proxy_default` controls whether the saved `camoufox.proxy` is applied at browser launch. When `false` (default), page traffic stays direct unless the agent passes `use_proxy: true` on a `browser` tool call — for example when navigating to sites blocked or unreachable from mainland China. This only enables the proxy already saved in config — arbitrary proxy URLs are not accepted at runtime.
+
+`backend_proxy` (top-level under `tools.browser`) is separate: it proxies CowAgent's HTTP calls to the Camofox REST API, not Camoufox page traffic.
 
 `camofox` is the existing Camofox REST backend, while `camoufox` is the Python package backend. Their configs are separate.

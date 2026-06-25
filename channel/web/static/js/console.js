@@ -157,6 +157,9 @@ const I18N = {
         config_browser_backend_proxy: '浏览器后端代理',
         config_browser_backend_proxy_hint: '用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。',
         config_browser_camoufox_auto_os: '自动',
+        config_browser_camoufox_proxy_hint: '用于 Camoufox 浏览器页面访问外网。默认不启用，需 agent 传 use_proxy 或开启默认启用。',
+        config_browser_proxy_default: '默认启用页面代理',
+        config_browser_proxy_default_hint: '关闭时，仅在 agent 调用 browser 工具并传 use_proxy: true 时启用已保存的 Camoufox 页面代理。',
         config_video_parse: '视频解析工具',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
@@ -444,6 +447,9 @@ const I18N = {
         config_browser_backend_proxy: 'Browser Backend Proxy',
         config_browser_backend_proxy_hint: 'Used only for CowAgent connecting to the Camofox REST API. It does not affect browser page traffic.',
         config_browser_camoufox_auto_os: 'Auto',
+        config_browser_camoufox_proxy_hint: 'Routes Camoufox page traffic through this proxy. Off by default unless use_proxy is passed or default-on is enabled below.',
+        config_browser_proxy_default: 'Enable page proxy by default',
+        config_browser_proxy_default_hint: 'When off, the saved Camoufox page proxy is used only when the agent passes use_proxy: true on browser tool calls.',
         config_video_parse: 'Video Parse Tool',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
@@ -4702,6 +4708,8 @@ function initBrowserConfigView(data) {
     const camoufoxUserDataEl = document.getElementById('cfg-camoufox-user-data');
     if (camoufoxUserDataEl) camoufoxUserDataEl.value = camoufox.user_data_dir || '~/.cow/camoufox_profile';
     initSecretInput(document.getElementById('cfg-camoufox-proxy'), camoufox.proxy_masked || '');
+    const proxyDefaultEl = document.getElementById('cfg-browser-proxy-default');
+    if (proxyDefaultEl) proxyDefaultEl.checked = cfg.proxy_default === true;
     const camoufoxIdleTimeoutEl = document.getElementById('cfg-camoufox-idle-timeout');
     if (camoufoxIdleTimeoutEl) camoufoxIdleTimeoutEl.value = camoufox.idle_timeout == null ? 10 : camoufox.idle_timeout;
     const osEl = document.getElementById('cfg-camoufox-os');
@@ -4734,6 +4742,7 @@ function collectBrowserConfigPayload() {
     const camoufoxIdleParsed = parseInt(camoufoxIdleRaw == null || camoufoxIdleRaw === '' ? '10' : camoufoxIdleRaw, 10);
     const payload = {
         engine,
+        proxy_default: document.getElementById('cfg-browser-proxy-default')?.checked === true,
         playwright: {
             cdp_endpoint: document.getElementById('cfg-playwright-cdp')?.value.trim() || '',
             user_data_dir: document.getElementById('cfg-playwright-user-data')?.value.trim() || '~/.cow/browser_profile',

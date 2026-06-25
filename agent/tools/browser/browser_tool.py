@@ -20,7 +20,12 @@ import os
 from typing import Dict, Any, Optional
 
 from agent.tools.base_tool import BaseTool, ToolResult
-from agent.tools.browser.factory import create_browser_service, _service_signature
+from agent.tools.browser.factory import (
+    create_browser_service,
+    _service_signature,
+    _normalize_browser_config,
+    saved_camoufox_proxy,
+)
 from common.log import logger
 
 
@@ -38,7 +43,12 @@ class BrowserTool(BaseTool):
         "For login/CAPTCHA/authorization etc., screenshot and ask the user for help. "
         "Login state is persisted across sessions (cookies / localStorage are kept in a "
         "user profile directory), so once the user logs in to a site, the agent can keep "
-        "using it without logging in again."
+        "using it without logging in again.\n\n"
+        "Proxy (Camoufox only): set tools.browser.camoufox.proxy in config to save a browser-page "
+        "proxy. Pass use_proxy=true when visiting sites that are blocked or not directly reachable "
+        "from mainland China (or set proxy_default to true to always use the saved proxy). By default "
+        "the saved proxy is off. Only the pre-configured proxy can be enabled — arbitrary proxy URLs "
+        "are not accepted at runtime."
     )
 
     params: dict = {
@@ -96,6 +106,17 @@ class BrowserTool(BaseTool):
             "timeout": {
                 "type": "integer",
                 "description": "Timeout in milliseconds (optional, default varies by action)"
+            },
+            "use_proxy": {
+                "type": "boolean",
+                "description": (
+                    "Camoufox only: when true, route browser page traffic through the proxy saved "
+                    "in tools.browser.camoufox.proxy. Set this when the target site is blocked or "
+                    "not directly reachable from mainland China. When false, force a direct "
+                    "connection even if proxy_default is enabled. Omit to follow proxy_default "
+                    "(off by default). Only the pre-configured proxy is used — arbitrary proxy URLs "
+                    "are not accepted."
+                )
             }
         },
         "required": ["action"]
@@ -109,6 +130,10 @@ class BrowserTool(BaseTool):
         self.cwd = self.config.get("cwd", os.getcwd())
         self._service = None
         self._service_signature = ""
+        # Active proxy mode for the live browser session. None means "not yet
+        # decided" (cold start); it is seeded from proxy_default on the first
+        # call that omits use_proxy, and only changes on an explicit True/False.
+        self._active_use_proxy = None
 
     def _effective_config(self) -> dict:
         """Read the latest runtime config so Web console switches hot-apply."""
@@ -122,10 +147,48 @@ class BrowserTool(BaseTool):
             logger.debug(f"[Browser] Failed to read runtime browser config: {e}")
         return self.config
 
+    def _validate_use_proxy(self, use_proxy: Optional[bool]) -> Optional[ToolResult]:
+        if use_proxy is not True:
+            return None
+        browser_cfg = _normalize_browser_config(self._effective_config())
+        engine = str(browser_cfg.get("engine") or "playwright").strip().lower()
+        if engine != "camoufox":
+            return ToolResult.fail(
+                "Error: use_proxy is only supported with tools.browser.engine=camoufox"
+            )
+        if not saved_camoufox_proxy(browser_cfg):
+            return ToolResult.fail(
+                "Error: use_proxy=true but no Camoufox browser proxy is configured "
+                "(set tools.browser.camoufox.proxy)"
+            )
+        return None
+
+    def _resolve_proxy_mode(self, use_proxy: Optional[bool]) -> bool:
+        """Resolve the proxy mode for this call and update the active session mode.
+
+        Tri-state semantics:
+          - explicit True/False: switch the active mode (may rebuild service).
+          - omitted (None): keep the active mode untouched. If no mode has been
+            decided yet (cold start), seed it once from proxy_default.
+
+        proxy_default only seeds the initial value; it is never re-read on
+        subsequent omitted calls, so an active proxied session stays sticky.
+        """
+        if use_proxy is True or use_proxy is False:
+            self._active_use_proxy = use_proxy
+        elif self._active_use_proxy is None:
+            browser_cfg = _normalize_browser_config(self._effective_config())
+            self._active_use_proxy = browser_cfg.get("proxy_default", False) is True
+        return self._active_use_proxy
+
     def _get_service(self):
         """Get or create the browser service, sharing across copies."""
         config = self._effective_config()
-        signature = _service_signature(config)
+        if self._active_use_proxy is None:
+            # Defensive: a handler called _get_service without going through
+            # execute(); seed the active mode from proxy_default once.
+            self._resolve_proxy_mode(None)
+        signature = _service_signature(config, self._active_use_proxy)
         if self._service is not None and self._service_signature == signature:
             return self._service
 
@@ -143,7 +206,7 @@ class BrowserTool(BaseTool):
             BrowserTool._shared_service = None
             BrowserTool._shared_signature = ""
 
-        self._service = create_browser_service(config)
+        self._service = create_browser_service(config, use_proxy=self._active_use_proxy)
         self._service_signature = signature
         BrowserTool._shared_service = self._service
         BrowserTool._shared_signature = signature
@@ -153,6 +216,14 @@ class BrowserTool(BaseTool):
         action = args.get("action", "").strip().lower()
         if not action:
             return ToolResult.fail("Error: 'action' parameter is required")
+
+        use_proxy = args.get("use_proxy") if "use_proxy" in args else None
+        if use_proxy is not None and not isinstance(use_proxy, bool):
+            return ToolResult.fail("Error: 'use_proxy' must be a boolean")
+        proxy_err = self._validate_use_proxy(use_proxy)
+        if proxy_err:
+            return proxy_err
+        self._resolve_proxy_mode(use_proxy)
 
         handler = self._ACTION_MAP.get(action)
         if not handler:
@@ -321,6 +392,7 @@ class BrowserTool(BaseTool):
         new_tool.cwd = self.cwd
         new_tool._service = self._service
         new_tool._service_signature = self._service_signature
+        new_tool._active_use_proxy = self._active_use_proxy
         return new_tool
 
     def close(self):

@@ -102,6 +102,7 @@ def status():
         click.echo(f"Camoufox persistent: {camoufox.get('persistent', True) is not False}")
         if camoufox.get("proxy"):
             click.echo(f"Camoufox browser proxy: {_mask_proxy_url(camoufox.get('proxy', ''))}")
+        click.echo(f"Camoufox proxy default: {browser_cfg.get('proxy_default', False) is True}")
         if camoufox.get("os"):
             click.echo(f"Camoufox target OS: {camoufox.get('os')}")
 
@@ -116,9 +117,10 @@ def status():
 @click.option("--port", type=int, default=None, help="Managed Camofox port.")
 @click.option("--user-data-dir", default="", help="Camoufox persistent profile directory.")
 @click.option("--browser-proxy", default="", help="Camoufox browser traffic proxy.")
+@click.option("--proxy-default/--no-proxy-default", default=None, help="Whether Camoufox uses the saved browser proxy by default.")
 @click.option("--target-os", type=click.Choice(["", "windows", "macos", "linux"], case_sensitive=False), default="", help="Camoufox fingerprint target OS.")
 @click.option("--persistent/--fresh", default=None, help="Whether Camoufox uses a persistent profile.")
-def switch(engine, base_url, access_key, admin_key, managed, auto_start, port, user_data_dir, browser_proxy, target_os, persistent):
+def switch(engine, base_url, access_key, admin_key, managed, auto_start, port, user_data_dir, browser_proxy, proxy_default, target_os, persistent):
     """Switch browser backend."""
     engine = engine.lower()
     cfg = load_config_json()
@@ -150,6 +152,8 @@ def switch(engine, base_url, access_key, admin_key, managed, auto_start, port, u
             camoufox["user_data_dir"] = "~/.cow/camoufox_profile"
         if browser_proxy:
             camoufox["proxy"] = _normalize_proxy_url(browser_proxy)
+        if proxy_default is not None:
+            browser_cfg["proxy_default"] = bool(proxy_default)
         if target_os:
             camoufox["os"] = target_os.lower()
         if persistent is not None:

@@ -3744,6 +3744,7 @@ class BrowserConfigHandler:
                 "proxy": "",
                 "idle_timeout": 10,
             },
+            "proxy_default": False,
             "backend_proxy": "",
         }
 

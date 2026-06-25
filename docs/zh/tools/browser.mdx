@@ -192,6 +192,7 @@ cow install-browser --engine camoufox
   "tools": {
     "browser": {
       "engine": "camoufox",
+      "proxy_default": false,
       "camoufox": {
         "persistent": true,
         "user_data_dir": "~/.cow/camoufox_profile",
@@ -205,5 +206,9 @@ cow install-browser --engine camoufox
   }
 }
 ```
+
+`proxy_default` 控制是否在启动浏览器时自动使用已保存的 `camoufox.proxy`。为 `false`（默认）时，页面流量直连，除非 agent 在 `browser` 工具调用中传 `use_proxy: true`（例如访问中国大陆无法直接访问的网站时）。运行时只能启用配置里已保存的代理，不能传入任意代理 URL。
+
+`backend_proxy`（位于 `tools.browser` 顶层）是另一项配置：仅代理 CowAgent 访问 Camofox REST API 的 HTTP 请求，不影响 Camoufox 页面流量。
 
 `camofox` 表示已有的 Camofox REST 后端，`camoufox` 表示 Python 包后端。两者配置不同，不会互相覆盖。
