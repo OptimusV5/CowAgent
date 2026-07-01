@@ -63,6 +63,9 @@
     },
     "video_parse": {
       "model": "gemini-2.5-flash",
+      "models": [
+        "gemini-2.5-flash"
+      ],
       "cookie_file": "",
       "proxy": "",
       "yt_dlp_proxy_sites": [],

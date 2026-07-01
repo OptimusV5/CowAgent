@@ -171,7 +171,8 @@ const I18N = {
         config_video_yt_dlp_proxy_sites_hint: '未选择站点时，yt-dlp 永远不使用代理。',
         config_video_yt_dlp_proxy_sites_empty: '没有匹配的站点',
         config_video_yt_dlp_proxy_sites_none: '未选择站点',
-        config_video_model: '模型',
+        config_video_model: '模型列表',
+        config_video_model_hint: '按顺序回退。支持一行一个或逗号分隔。',
         config_video_cookies: 'yt-dlp Cookies',
         config_video_cookies_hint: '粘贴 Netscape HTTP Cookie File 格式内容，保存后用于 yt-dlp --cookies。',
         config_video_cookies_saved: '已保存 Cookies',
@@ -461,7 +462,8 @@ const I18N = {
         config_video_yt_dlp_proxy_sites_hint: 'When no site is selected, yt-dlp never uses the proxy.',
         config_video_yt_dlp_proxy_sites_empty: 'No matching sites',
         config_video_yt_dlp_proxy_sites_none: 'No sites selected',
-        config_video_model: 'Model',
+        config_video_model: 'Models',
+        config_video_model_hint: 'Tried in order. Use one model per line or comma-separated values.',
         config_video_cookies: 'yt-dlp Cookies',
         config_video_cookies_hint: 'Paste Netscape HTTP Cookie File content. It will be used with yt-dlp --cookies after saving.',
         config_video_cookies_saved: 'Cookies saved',
@@ -5023,7 +5025,7 @@ function initVideoParseConfigView(data) {
     setValue('cfg-video-upload-api-base', cfg.upload_api_base || cfg.api_base || 'https://generativelanguage.googleapis.com');
     initSecretInput(document.getElementById('cfg-video-proxy'), cfg.proxy_masked || '');
     renderVideoYtDlpProxySites(cfg);
-    setValue('cfg-video-model', cfg.model || 'gemini-2.5-flash');
+    setValue('cfg-video-model', Array.isArray(cfg.models) && cfg.models.length ? cfg.models.join('\n') : (cfg.model || 'gemini-2.5-flash'));
     updateVideoCookieStatus(cfg);
     setValue('cfg-video-prompt', cfg.prompt || '');
     setValue('cfg-video-download-timeout', cfg.download_timeout || 600);
@@ -5043,6 +5045,10 @@ function initVideoParseConfigView(data) {
 
 function collectVideoParseConfigPayload() {
     const getValue = (id) => document.getElementById(id)?.value.trim() || '';
+    const getListValue = (id) => getValue(id)
+        .split(/[\n\r,，]+/)
+        .map((item) => item.trim())
+        .filter((item, index, arr) => item && arr.indexOf(item) === index);
     const getInt = (id, fallback) => {
         const raw = document.getElementById(id)?.value;
         if (raw == null || raw === '') return fallback;
@@ -5050,10 +5056,12 @@ function collectVideoParseConfigPayload() {
         return Number.isFinite(parsed) ? parsed : fallback;
     };
     const maxMb = getInt('cfg-video-max-mb', 2048);
+    const models = getListValue('cfg-video-model');
     const payload = {
         api_base: getValue('cfg-video-api-base') || 'https://generativelanguage.googleapis.com',
         upload_api_base: getValue('cfg-video-upload-api-base'),
-        model: getValue('cfg-video-model') || 'gemini-2.5-flash',
+        model: models[0] || 'gemini-2.5-flash',
+        models: models.length ? models : ['gemini-2.5-flash'],
         prompt: getValue('cfg-video-prompt'),
         download_timeout: getInt('cfg-video-download-timeout', 600),
         ffmpeg_timeout: getInt('cfg-video-ffmpeg-timeout', 300),

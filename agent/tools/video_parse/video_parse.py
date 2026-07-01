@@ -98,6 +98,19 @@ class VideoParseError(Exception):
         self.status_code = status_code
 
 
+class VideoParseModelFallbackError(VideoParseError):
+    def __init__(
+        self,
+        message: str,
+        model_errors: List[Dict[str, Any]],
+        fallbackable: bool = False,
+        status_code: Optional[int] = None,
+    ):
+        super().__init__(message, status_code=status_code)
+        self.model_errors = model_errors
+        self.fallbackable = fallbackable
+
+
 class VideoParseTool(BaseTool):
     """Analyze video files or video links using Gemini Files API."""
 
@@ -133,7 +146,15 @@ class VideoParseTool(BaseTool):
             },
             "model": {
                 "type": "string",
-                "description": "Optional Gemini model name. Web video_parse config takes precedence when set.",
+                "description": "Optional primary Gemini model name. Web video_parse config takes precedence when set.",
+            },
+            "models": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional ordered Gemini model fallback list. The tool tries each model until one succeeds. "
+                    "Web video_parse config takes precedence when set."
+                ),
             },
             "keep_temp": {
                 "type": "boolean",
@@ -155,6 +176,7 @@ class VideoParseTool(BaseTool):
         remote_file_names: List[str] = []
         success = False
         youtube_direct_error: Optional[str] = None
+        youtube_direct_model_errors: List[Dict[str, Any]] = []
         youtube_direct_attempted = False
 
         try:
@@ -164,19 +186,20 @@ class VideoParseTool(BaseTool):
             if url and self._should_use_youtube_direct(url, runtime):
                 youtube_direct_attempted = True
                 try:
-                    self.report_progress("正在通过 YouTube 直链调用 Gemini 解析...")
-                    result = self._analyze_youtube_url_direct(url, runtime, runtime["prompt"])
+                    result = self._analyze_youtube_url_direct_with_model_fallback(url, runtime, runtime["prompt"])
                     meta = result.setdefault("_meta", {})
                     meta.update({
-                        "model": runtime["model"],
                         "source_url": url,
                         "youtube_direct_attempted": True,
                         "fallback_used": False,
                     })
+                    meta.setdefault("model", runtime["model"])
                     success = True
                     return ToolResult.success(result)
                 except Exception as e:
                     youtube_direct_error = str(e)
+                    if isinstance(e, VideoParseModelFallbackError):
+                        youtube_direct_model_errors = e.model_errors
                     if not self._should_youtube_direct_fallback(e, runtime):
                         logger.warning(
                             f"[VideoParse] YouTube direct analysis failed (non-recoverable): {e}"
@@ -185,12 +208,15 @@ class VideoParseTool(BaseTool):
                             "_meta": {
                                 "mode": "youtube_url_direct",
                                 "model": runtime["model"],
+                                "models": runtime.get("models") or [runtime["model"]],
                                 "source_url": url,
                                 "youtube_direct_attempted": True,
                                 "fallback_used": False,
                                 "youtube_direct_error": youtube_direct_error,
                             }
                         }
+                        if isinstance(e, VideoParseModelFallbackError):
+                            diagnostics["_meta"]["model_errors"] = e.model_errors
                         return ToolResult.fail(f"Error: {youtube_direct_error}", ext_data=diagnostics)
                     logger.warning(
                         f"[VideoParse] YouTube direct analysis failed, falling back to download: {e}"
@@ -233,7 +259,7 @@ class VideoParseTool(BaseTool):
                 )
             final_path = self._ensure_ascii_upload_path(final_path, work_dir)
 
-            result = self._analyze_video_or_segments(
+            result = self._analyze_video_or_segments_with_model_fallback(
                 final_path=final_path,
                 mime_type=mime_type,
                 work_dir=work_dir,
@@ -241,8 +267,8 @@ class VideoParseTool(BaseTool):
                 remote_file_names=remote_file_names,
             )
             meta = result.setdefault("_meta", {})
+            meta.setdefault("model", runtime["model"])
             meta.update({
-                "model": runtime["model"],
                 "mime_type": mime_type,
                 "merge_performed": merge_performed,
                 "temp_files_deleted": not runtime["keep_temp"],
@@ -256,11 +282,30 @@ class VideoParseTool(BaseTool):
                     meta["source_url"] = url
                 if youtube_direct_error:
                     meta["youtube_direct_error"] = youtube_direct_error
+                if youtube_direct_model_errors:
+                    meta["youtube_direct_model_errors"] = youtube_direct_model_errors
             if runtime["keep_temp"]:
                 meta["temp_dir"] = work_dir
             success = True
             return ToolResult.success(result)
 
+        except VideoParseModelFallbackError as e:
+            logger.warning(f"[VideoParse] {e}")
+            diagnostics = {
+                "_meta": {
+                    "model": runtime["model"],
+                    "models": runtime.get("models") or [runtime["model"]],
+                    "model_errors": e.model_errors,
+                }
+            }
+            if youtube_direct_attempted:
+                diagnostics["_meta"]["youtube_direct_attempted"] = True
+                diagnostics["_meta"]["fallback_used"] = bool(youtube_direct_error)
+                if youtube_direct_error:
+                    diagnostics["_meta"]["youtube_direct_error"] = youtube_direct_error
+                if youtube_direct_model_errors:
+                    diagnostics["_meta"]["youtube_direct_model_errors"] = youtube_direct_model_errors
+            return ToolResult.fail(f"Error: {e}", ext_data=diagnostics)
         except VideoParseError as e:
             logger.warning(f"[VideoParse] {e}")
             return ToolResult.fail(f"Error: {e}")
@@ -296,12 +341,7 @@ class VideoParseTool(BaseTool):
             or DEFAULT_API_BASE
         )
         upload_api_base = cfg.get("upload_api_base") or api_base
-        model = (
-            cfg.get("model")
-            or args.get("model")
-            or os.environ.get("GEMINI_VIDEO_MODEL")
-            or DEFAULT_MODEL
-        )
+        models = self._configured_models(cfg, args)
         keep_temp = args.get("keep_temp")
         if keep_temp is None:
             keep_temp = self._bool_value(cfg.get("keep_temp", False))
@@ -310,7 +350,8 @@ class VideoParseTool(BaseTool):
             "api_key": cfg.get("api_key") or os.environ.get("GEMINI_API_KEY") or conf().get("gemini_api_key", ""),
             "api_base": str(api_base).rstrip("/"),
             "upload_api_base": str(upload_api_base).rstrip("/"),
-            "model": str(model).strip() or DEFAULT_MODEL,
+            "model": models[0],
+            "models": models,
             "prompt": args.get("prompt") or cfg.get("prompt") or DEFAULT_PROMPT,
             "download_timeout": self._int_value(cfg.get("download_timeout"), DEFAULT_DOWNLOAD_TIMEOUT),
             "ffmpeg_timeout": self._int_value(cfg.get("ffmpeg_timeout"), DEFAULT_FFMPEG_TIMEOUT),
@@ -348,6 +389,93 @@ class VideoParseTool(BaseTool):
 
         self.config = cfg
         return cfg
+
+    def _configured_models(self, cfg: Dict[str, Any], args: Dict[str, Any]) -> List[str]:
+        candidates = (
+            cfg.get("models"),
+            cfg.get("model"),
+            args.get("models"),
+            args.get("model"),
+            os.environ.get("GEMINI_VIDEO_MODELS"),
+            os.environ.get("GEMINI_VIDEO_MODEL"),
+            DEFAULT_MODEL,
+        )
+        for value in candidates:
+            models = self._normalize_model_list(value)
+            if models:
+                return models
+        return [DEFAULT_MODEL]
+
+    def _normalize_model_list(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raw_items = re.split(r"[\n\r,，]+", value)
+        elif isinstance(value, (list, tuple)):
+            raw_items = value
+        else:
+            raw_items = [value]
+
+        models = []
+        seen = set()
+        for item in raw_items:
+            model = str(item or "").strip()
+            if not model or model in seen:
+                continue
+            seen.add(model)
+            models.append(model)
+        return models
+
+    def _runtime_for_model(self, runtime: Dict[str, Any], model: str) -> Dict[str, Any]:
+        model_runtime = dict(runtime)
+        model_runtime["model"] = model
+        return model_runtime
+
+    def _model_error_info(self, model: str, error: Exception) -> Dict[str, Any]:
+        info = {
+            "model": model,
+            "error": str(error),
+        }
+        status_code = getattr(error, "status_code", None)
+        if status_code:
+            info["status_code"] = status_code
+        return info
+
+    def _model_fallback_error(
+        self,
+        action: str,
+        model_errors: List[Dict[str, Any]],
+        fallbackable: bool = False,
+    ) -> VideoParseModelFallbackError:
+        details = "; ".join(
+            "{}: {}".format(item.get("model") or "unknown", self._tail(item.get("error") or "", 500))
+            for item in model_errors
+        )
+        status_code = None
+        for item in reversed(model_errors):
+            if item.get("status_code"):
+                status_code = item["status_code"]
+                break
+        return VideoParseModelFallbackError(
+            f"All configured Gemini models failed during {action}: {details}",
+            model_errors=model_errors,
+            fallbackable=fallbackable,
+            status_code=status_code,
+        )
+
+    def _attach_model_fallback_meta(
+        self,
+        meta: Dict[str, Any],
+        models: List[str],
+        success_index: int,
+        errors: List[Dict[str, Any]],
+    ) -> None:
+        meta["model"] = models[success_index]
+        meta["models"] = models
+        meta["models_attempted"] = models[: success_index + 1]
+        meta["model_fallback_used"] = success_index > 0
+        if errors:
+            meta["model_errors"] = errors
 
     def _resolve_input(self, args: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         url = (args.get("url") or "").strip()
@@ -449,6 +577,8 @@ class VideoParseTool(BaseTool):
     def _should_youtube_direct_fallback(self, error: Exception, runtime: Dict[str, Any]) -> bool:
         if not runtime.get("youtube_direct_fallback", True):
             return False
+        if isinstance(error, VideoParseModelFallbackError):
+            return error.fallbackable
         # Default to fallback; only refuse for clearly non-recoverable errors so that
         # transient/network/parse failures still go through the download path.
         return not self._is_youtube_direct_non_fallbackable(error)
@@ -476,6 +606,33 @@ class VideoParseTool(BaseTool):
         if "model" in message and ("not found" in message or "does not exist" in message):
             return True
         return False
+
+    def _analyze_youtube_url_direct_with_model_fallback(
+        self,
+        url: str,
+        runtime: Dict[str, Any],
+        prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        models = runtime.get("models") or [runtime["model"]]
+        errors: List[Dict[str, Any]] = []
+        fallbackable = False
+        for index, model in enumerate(models):
+            model_runtime = self._runtime_for_model(runtime, model)
+            self.report_progress(f"正在通过 YouTube 直链调用 Gemini 解析（模型 {model}）...")
+            try:
+                result = self._analyze_youtube_url_direct(url, model_runtime, prompt=prompt)
+                self._attach_model_fallback_meta(result.setdefault("_meta", {}), models, index, errors)
+                return result
+            except Exception as e:
+                errors.append(self._model_error_info(model, e))
+                if self._should_youtube_direct_fallback(e, model_runtime):
+                    fallbackable = True
+                logger.warning(f"[VideoParse] YouTube direct analysis failed with model {model}: {e}")
+        raise self._model_fallback_error(
+            "YouTube direct analysis",
+            errors,
+            fallbackable=fallbackable,
+        )
 
     def _analyze_youtube_url_direct(
         self,
@@ -910,6 +1067,35 @@ class VideoParseTool(BaseTool):
                 "usage_total": usage_total,
             },
         }
+
+    def _analyze_video_or_segments_with_model_fallback(
+        self,
+        final_path: str,
+        mime_type: str,
+        work_dir: str,
+        runtime: Dict[str, Any],
+        remote_file_names: List[str],
+    ) -> Dict[str, Any]:
+        models = runtime.get("models") or [runtime["model"]]
+        errors: List[Dict[str, Any]] = []
+        for index, model in enumerate(models):
+            model_runtime = self._runtime_for_model(runtime, model)
+            if index:
+                self.report_progress(f"前一个模型解析失败，正在切换到 {model} 重试...")
+            try:
+                result = self._analyze_video_or_segments(
+                    final_path=final_path,
+                    mime_type=mime_type,
+                    work_dir=work_dir,
+                    runtime=model_runtime,
+                    remote_file_names=remote_file_names,
+                )
+                self._attach_model_fallback_meta(result.setdefault("_meta", {}), models, index, errors)
+                return result
+            except Exception as e:
+                errors.append(self._model_error_info(model, e))
+                logger.warning(f"[VideoParse] Video analysis failed with model {model}: {e}")
+        raise self._model_fallback_error("video file analysis", errors)
 
     def _analyze_single_video(
         self,

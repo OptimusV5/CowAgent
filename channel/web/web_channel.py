@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import os
 import random
+import re
 import shutil
 import threading
 import time
@@ -4019,6 +4020,7 @@ class VideoParseConfigHandler:
             "api_base": "https://generativelanguage.googleapis.com",
             "upload_api_base": "https://generativelanguage.googleapis.com",
             "model": "gemini-2.5-flash",
+            "models": ["gemini-2.5-flash"],
             "prompt": (
                 "请用中文总结这个视频，返回 JSON。字段包括：summary、main_points、timeline、"
                 "spoken_content、visual_content、on_screen_text、uncertainties。不要输出 Markdown。"
@@ -4046,9 +4048,14 @@ class VideoParseConfigHandler:
     def _merge_defaults(cls, cfg: dict = None) -> dict:
         base = cls._default_config()
         if isinstance(cfg, dict):
+            legacy_models = None
+            if "models" not in cfg and "model" in cfg:
+                legacy_models = cls._normalize_model_list(cfg.get("model"))
             for key, value in cfg.items():
                 if key in base:
                     base[key] = value
+            if legacy_models:
+                base["models"] = legacy_models
         return base
 
     @classmethod
@@ -4066,6 +4073,10 @@ class VideoParseConfigHandler:
             for key, value in incoming.items():
                 if key in cfg:
                     cfg[key] = value
+            if "model" in incoming and "models" not in incoming:
+                models = cls._normalize_model_list(incoming.get("model"))
+                if models:
+                    cfg["models"] = models
         return cls._merge_defaults(cfg)
 
     @classmethod
@@ -4106,9 +4117,31 @@ class VideoParseConfigHandler:
         except Exception:
             return default
 
+    @staticmethod
+    def _normalize_model_list(value) -> list:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raw_items = re.split(r"[\n\r,，]+", value)
+        elif isinstance(value, (list, tuple)):
+            raw_items = value
+        else:
+            raw_items = [value]
+
+        models = []
+        seen = set()
+        for item in raw_items:
+            model = str(item or "").strip()
+            if not model or model in seen:
+                continue
+            seen.add(model)
+            models.append(model)
+        return models
+
     @classmethod
     def _normalize_config(cls, cfg: dict) -> dict:
         defaults = cls._default_config()
+        explicit_models = isinstance(cfg, dict) and "models" in cfg
         normalized = cls._merge_defaults(cfg)
         for key in (
             "download_timeout",
@@ -4124,14 +4157,19 @@ class VideoParseConfigHandler:
             normalized[key] = cls._bool_value(normalized.get(key))
         for key in ("api_key", "api_base", "upload_api_base", "model", "prompt", "temp_dir", "cookie_file", "proxy"):
             normalized[key] = str(normalized.get(key) or "").strip()
+        models = cls._normalize_model_list(normalized.get("models")) if explicit_models else []
+        if not models:
+            models = cls._normalize_model_list(normalized.get("model"))
+        if not models:
+            models = list(defaults["models"])
+        normalized["models"] = models
+        normalized["model"] = models[0]
         normalized["proxy"] = normalize_proxy_url(normalized.get("proxy", ""))
         normalized["yt_dlp_proxy_sites"] = normalize_yt_dlp_proxy_sites(normalized.get("yt_dlp_proxy_sites"))
         if not normalized["api_base"]:
             normalized["api_base"] = defaults["api_base"]
         if not normalized["upload_api_base"]:
             normalized["upload_api_base"] = normalized["api_base"]
-        if not normalized["model"]:
-            normalized["model"] = defaults["model"]
         if not normalized["prompt"]:
             normalized["prompt"] = defaults["prompt"]
         return normalized
