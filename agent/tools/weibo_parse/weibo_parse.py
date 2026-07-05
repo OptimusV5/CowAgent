@@ -65,27 +65,45 @@ class WeiboParseTool(BaseTool):
         args = args or {}
         try:
             runtime = self._runtime_config()
-            weibo_id = self._resolve_weibo_id(args)
             if not runtime["cookie"]:
                 raise WeiboParseError("Missing Weibo cookie. Configure tools.weibo_parse.cookie in Web config.")
+            weibo_id = self._resolve_weibo_id(args, runtime)
 
             status_url = f"https://m.weibo.cn/status/{weibo_id}"
             self.report_progress("正在获取微博正文...")
-            status_html = self._request_text(status_url, runtime, is_document=True)
+            status_html = ""
+            status_page_error = ""
+            try:
+                status_html = self._request_text(status_url, runtime, is_document=True)
+            except WeiboParseError as e:
+                status_page_error = str(e)
+                logger.warning(f"[WeiboParse] Status page request failed, trying API fallback: {e}")
 
             render_data = self._extract_render_data(status_html)
             status = self._find_status(render_data, weibo_id)
+            status_source = "status_page"
+            if not status:
+                self.report_progress("正在通过微博接口兜底获取正文...")
+                status = self._fetch_status_api(weibo_id, runtime)
+                status_source = "statuses_show"
             if not status:
                 status = self._fallback_status_from_html(status_html, weibo_id)
+                status_source = "status_html_meta"
             if not status:
                 raise WeiboParseError("Could not parse Weibo status body from response")
 
             comments = self._extract_comments(render_data)
             comments_source = "status_page"
+            comments_error = ""
             if not comments:
                 self.report_progress("正在获取第一页评论...")
-                comments = self._fetch_first_page_comments(weibo_id, runtime)
                 comments_source = "hotflow"
+                try:
+                    comments = self._fetch_first_page_comments(weibo_id, runtime)
+                except WeiboParseError as e:
+                    comments = []
+                    comments_error = str(e)
+                    logger.warning(f"[WeiboParse] Failed to fetch comments, returning status only: {e}")
 
             result = {
                 "id": weibo_id,
@@ -95,8 +113,11 @@ class WeiboParseTool(BaseTool):
                 "_meta": {
                     "source": "m.weibo.cn",
                     "status_url": status_url,
+                    "status_source": status_source,
+                    "status_page_error": status_page_error,
                     "comments_source": comments_source,
                     "comment_count": len(comments),
+                    "comments_error": comments_error,
                     "user_agent": runtime["user_agent"],
                 },
             }
@@ -141,10 +162,11 @@ class WeiboParseTool(BaseTool):
         self.config = cfg
         return cfg
 
-    def _resolve_weibo_id(self, args: Dict[str, Any]) -> str:
+    def _resolve_weibo_id(self, args: Dict[str, Any], runtime: Optional[Dict[str, Any]] = None) -> str:
         raw = str(args.get("id") or args.get("weibo_id") or args.get("url") or "").strip()
         if not raw:
             raise WeiboParseError("Missing required parameter: id")
+        original = raw
         if raw.startswith("http://") or raw.startswith("https://"):
             parsed = urlparse(raw)
             parts = [p for p in (parsed.path or "").split("/") if p]
@@ -152,12 +174,48 @@ class WeiboParseTool(BaseTool):
                 idx = parts.index("status")
                 if idx + 1 < len(parts):
                     raw = parts[idx + 1]
+            elif "detail" in parts:
+                idx = parts.index("detail")
+                if idx + 1 < len(parts):
+                    raw = parts[idx + 1]
             else:
                 raw = parts[-1] if parts else raw
         raw = raw.split("?")[0].split("#")[0].strip()
+        if not re.fullmatch(r"\d{6,}", raw) and original.startswith(("http://", "https://")):
+            raw = self._resolve_weibo_id_from_share_url(original, runtime)
         if not re.fullmatch(r"\d{6,}", raw):
             raise WeiboParseError(f"Invalid Weibo ID: {raw}")
         return raw
+
+    def _resolve_weibo_id_from_share_url(
+        self,
+        url: str,
+        runtime: Optional[Dict[str, Any]],
+    ) -> str:
+        if not runtime:
+            return ""
+        response = requests.get(
+            url,
+            headers=self._headers(runtime, is_document=True),
+            timeout=runtime["timeout"],
+            allow_redirects=True,
+        )
+        if response.status_code >= 400:
+            raise WeiboParseError(f"Weibo share URL request failed: HTTP {response.status_code}")
+        response.encoding = response.encoding or "utf-8"
+        text = "\n".join([response.url or "", response.text or ""])
+        patterns = (
+            r"m\.weibo\.cn/status/(\d{6,})",
+            r"m\.weibo\.cn/detail/(\d{6,})",
+            r"[?&](?:id|mid|oid|fid)=(\d{6,})",
+            r'"(?:id|mid|idstr)"\s*:\s*"?(\d{6,})"?',
+            r"\b(?:status|detail)/(\d{6,})",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
+        raise WeiboParseError("Could not resolve Weibo ID from share URL")
 
     def _headers(self, runtime: Dict[str, Any], is_document: bool = False) -> Dict[str, str]:
         headers = {
@@ -222,9 +280,75 @@ class WeiboParseTool(BaseTool):
             raise WeiboParseError(f"Weibo comments response is not JSON: {e}") from e
         if data.get("ok") not in (1, True, "1") and not data.get("data"):
             message = data.get("msg") or data.get("message") or "unknown error"
+            if "还没有人评论" in str(message) or "抢沙发" in str(message):
+                return []
             raise WeiboParseError(f"Weibo comments request failed: {message}")
         comments = self._get_nested(data, "data", "data")
         return comments if isinstance(comments, list) else []
+
+    def _fetch_status_api(self, weibo_id: str, runtime: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        urls = (
+            f"https://m.weibo.cn/statuses/show?id={weibo_id}",
+            f"https://m.weibo.cn/detail/{weibo_id}",
+        )
+        last_error = ""
+        for url in urls:
+            try:
+                response = requests.get(
+                    url,
+                    headers=self._headers(runtime, is_document=False),
+                    timeout=runtime["timeout"],
+                    allow_redirects=True,
+                )
+                if response.status_code >= 400:
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+                content_type = response.headers.get("Content-Type", "")
+                if "json" not in content_type.lower() and not response.text.strip().startswith(("{", "[")):
+                    last_error = "non-json response"
+                    continue
+                data = response.json()
+                status = data.get("data") if isinstance(data, dict) else None
+                if isinstance(status, dict):
+                    return self._maybe_fetch_long_text(status, weibo_id, runtime)
+            except Exception as e:
+                last_error = str(e)
+                logger.debug(f"[WeiboParse] status API fallback failed for {url}: {e}")
+        if last_error:
+            logger.warning(f"[WeiboParse] status API fallback did not return body: {last_error}")
+        return None
+
+    def _maybe_fetch_long_text(
+        self,
+        status: Dict[str, Any],
+        weibo_id: str,
+        runtime: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self._get_nested(status, "longText", "longTextContent"):
+            return status
+        if not status.get("isLongText") and not status.get("is_long_text"):
+            return status
+        try:
+            url = f"https://m.weibo.cn/statuses/extend?id={weibo_id}"
+            response = requests.get(
+                url,
+                headers=self._headers(runtime, is_document=False),
+                timeout=runtime["timeout"],
+                allow_redirects=True,
+            )
+            if response.status_code >= 400:
+                return status
+            data = response.json()
+            long_text = self._get_nested(data, "data", "longTextContent")
+            if long_text:
+                status = dict(status)
+                long_text_obj = status.get("longText") if isinstance(status.get("longText"), dict) else {}
+                long_text_obj = dict(long_text_obj)
+                long_text_obj["longTextContent"] = long_text
+                status["longText"] = long_text_obj
+        except Exception as e:
+            logger.debug(f"[WeiboParse] long text fallback failed: {e}")
+        return status
 
     def _extract_render_data(self, text: str) -> Any:
         for marker in ("$render_data", "render_data", "__INITIAL_STATE__"):
