@@ -1153,6 +1153,7 @@ class WebChannel(ChatChannel):
             '/api/models', 'ModelsHandler',
             '/api/browser', 'BrowserConfigHandler',
             '/api/video-parse', 'VideoParseConfigHandler',
+            '/api/weibo-parse', 'WeiboParseConfigHandler',
             '/api/channels', 'ChannelsHandler',
             '/api/weixin/qrlogin', 'WeixinQrHandler',
             '/api/feishu/register', 'FeishuRegisterHandler',
@@ -4378,6 +4379,197 @@ class VideoParseConfigHandler:
             }, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[VideoParseConfig] POST failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class WeiboParseConfigHandler:
+    """API for weibo_parse tool configuration."""
+
+    DEFAULT_USER_AGENT = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/149.0.0.0 Safari/537.36"
+    )
+
+    @classmethod
+    def _default_config(cls) -> dict:
+        return {
+            "cookie": "",
+            "user_agent": cls.DEFAULT_USER_AGENT,
+            "timeout": 20,
+        }
+
+    @classmethod
+    def _merge_defaults(cls, cfg: dict = None) -> dict:
+        base = cls._default_config()
+        if isinstance(cfg, dict):
+            for key, value in cfg.items():
+                if key in base:
+                    base[key] = value
+        return base
+
+    @classmethod
+    def _current_config(cls) -> dict:
+        tools = conf().get("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+        cfg = tools.get("weibo_parse") if isinstance(tools.get("weibo_parse"), dict) else {}
+        return cls._merge_defaults(cfg)
+
+    @classmethod
+    def _merge_with_current(cls, incoming: dict = None) -> dict:
+        cfg = cls._current_config()
+        if isinstance(incoming, dict):
+            for key, value in incoming.items():
+                if key in cfg:
+                    cfg[key] = value
+        return cls._merge_defaults(cfg)
+
+    @classmethod
+    def _config_path(cls) -> str:
+        return ModelsHandler._config_path()
+
+    @classmethod
+    def _read_file_config(cls) -> dict:
+        path = cls._config_path()
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @classmethod
+    def _write_file_config(cls, data: dict) -> None:
+        with open(cls._config_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    @staticmethod
+    def _normalize_cookie(value: str) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip())
+
+    @staticmethod
+    def _mask_cookie(value: str) -> str:
+        value = str(value or "").strip()
+        if not value:
+            return ""
+        parts = []
+        for part in value.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            key = part.split("=", 1)[0].strip()
+            parts.append(f"{key}=***" if key else "***")
+            if len(parts) >= 5:
+                parts.append("...")
+                break
+        return "; ".join(parts) if parts else "***"
+
+    @staticmethod
+    def _int_value(value, default: int) -> int:
+        try:
+            if value is None or value == "":
+                return default
+            return int(value)
+        except Exception:
+            return default
+
+    @classmethod
+    def _normalize_config(cls, cfg: dict) -> dict:
+        defaults = cls._default_config()
+        normalized = cls._merge_defaults(cfg)
+        normalized["cookie"] = cls._normalize_cookie(normalized.get("cookie"))
+        normalized["user_agent"] = str(normalized.get("user_agent") or "").strip()
+        if not normalized["user_agent"]:
+            normalized["user_agent"] = defaults["user_agent"]
+        normalized["timeout"] = max(1, cls._int_value(normalized.get("timeout"), defaults["timeout"]))
+        return normalized
+
+    @classmethod
+    def _public_config(cls, cfg: dict) -> dict:
+        public = dict(cfg)
+        cookie = public.pop("cookie", "") or ""
+        public["cookie_masked"] = cls._mask_cookie(cookie)
+        public["cookie_configured"] = bool(cookie)
+        return public
+
+    @staticmethod
+    def _health(cfg: dict) -> dict:
+        return {
+            "cookie": bool((cfg.get("cookie") or "").strip()),
+            "user_agent": bool((cfg.get("user_agent") or "").strip()),
+        }
+
+    @classmethod
+    def _apply_runtime_config(cls, cfg: dict) -> None:
+        local_config = conf()
+        tools = local_config.get("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+        tools["weibo_parse"] = cfg
+        local_config["tools"] = tools
+        try:
+            from agent.tools.tool_manager import ToolManager
+            tm = ToolManager()
+            if not hasattr(tm, "tool_configs") or not isinstance(tm.tool_configs, dict):
+                tm.tool_configs = {}
+            tm.tool_configs["weibo_parse"] = cfg
+            logger.info("[WeiboParseConfig] weibo_parse runtime config refreshed")
+        except Exception as e:
+            logger.warning(f"[WeiboParseConfig] runtime refresh failed: {e}")
+
+    def GET(self):
+        _require_auth()
+        web.header("Content-Type", "application/json; charset=utf-8")
+        try:
+            cfg = self._normalize_config(self._current_config())
+            return json.dumps({
+                "status": "success",
+                "config": self._public_config(cfg),
+                "health": self._health(cfg),
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WeiboParseConfig] GET failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+    def POST(self):
+        _require_auth()
+        web.header("Content-Type", "application/json; charset=utf-8")
+        try:
+            data = json.loads(web.data() or b"{}")
+            action = (data.get("action") or "save").strip().lower()
+            incoming = data.get("config") if isinstance(data.get("config"), dict) else {}
+            cfg = self._merge_with_current(incoming)
+            if data.get("cookie_clear") or incoming.get("cookie_clear"):
+                cfg["cookie"] = ""
+            cfg = self._normalize_config(cfg)
+
+            if action == "test":
+                health = self._health(cfg)
+                return json.dumps({
+                    "status": "success",
+                    "ok": bool(health.get("cookie")),
+                    "health": health,
+                    "config": self._public_config(cfg),
+                }, ensure_ascii=False)
+
+            if action != "save":
+                return json.dumps({"status": "error", "message": f"unknown action: {action!r}"})
+
+            file_cfg = self._read_file_config()
+            tools = file_cfg.get("tools")
+            if not isinstance(tools, dict):
+                tools = {}
+            tools["weibo_parse"] = cfg
+            file_cfg["tools"] = tools
+            self._write_file_config(file_cfg)
+            self._apply_runtime_config(cfg)
+            logger.info("[WeiboParseConfig] weibo_parse config saved")
+            return json.dumps({
+                "status": "success",
+                "config": self._public_config(cfg),
+                "health": self._health(cfg),
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WeiboParseConfig] POST failed: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 

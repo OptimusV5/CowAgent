@@ -199,6 +199,18 @@ const I18N = {
         config_video_key_env: '环境变量 Key',
         config_video_key_global: '全局 Key',
         config_video_key_missing: '未配置 Key',
+        config_weibo_parse: '微博解析工具',
+        config_weibo_cookie: '微博 Cookie',
+        config_weibo_cookie_hint: '必填。使用 m.weibo.cn 登录态 Cookie 获取正文和第一页评论。',
+        config_weibo_cookie_clear: '清除已保存 Cookie',
+        config_weibo_user_agent: 'User-Agent',
+        config_weibo_user_agent_hint: '选填。留空使用默认 Chrome 149 macOS UA。',
+        config_weibo_timeout: '请求超时秒',
+        config_weibo_test: '检查配置',
+        config_weibo_ok: '配置正常',
+        config_weibo_failed: '配置异常',
+        config_weibo_cookie_missing: '未配置 Cookie',
+        config_weibo_cookie_configured: 'Cookie 已配置',
         config_language: '语言', config_language_hint: '界面展示、命令文案、系统提示词等使用的语言（与右上角切换同步）',
         config_model_advanced: '高级配置',
         config_model_proxy: '模型 API 代理',
@@ -490,6 +502,18 @@ const I18N = {
         config_video_key_env: 'Env key',
         config_video_key_global: 'Global key',
         config_video_key_missing: 'No key',
+        config_weibo_parse: 'Weibo Parse Tool',
+        config_weibo_cookie: 'Weibo Cookie',
+        config_weibo_cookie_hint: 'Required. Uses m.weibo.cn login cookies to fetch the post and first-page comments.',
+        config_weibo_cookie_clear: 'Clear saved Cookie',
+        config_weibo_user_agent: 'User-Agent',
+        config_weibo_user_agent_hint: 'Optional. Empty uses the default Chrome 149 macOS UA.',
+        config_weibo_timeout: 'Request timeout (s)',
+        config_weibo_test: 'Check Config',
+        config_weibo_ok: 'Config OK',
+        config_weibo_failed: 'Config issue',
+        config_weibo_cookie_missing: 'Cookie missing',
+        config_weibo_cookie_configured: 'Cookie configured',
         config_language: 'Language', config_language_hint: 'Language for the UI, command text, system prompts and more (synced with the top-right switch)',
         config_model_advanced: 'Advanced',
         config_model_proxy: 'Model API Proxy',
@@ -4164,6 +4188,7 @@ let cfgProviderValue = '';
 let cfgModelValue = '';
 let browserConfigState = null;
 let videoParseConfigState = null;
+let weiboParseConfigState = null;
 
 // --- Custom dropdown helper ---
 function initDropdown(el, options, selectedValue, onChange, opts) {
@@ -5149,6 +5174,101 @@ function testVideoParseConfig() {
     .finally(() => { if (btn) btn.disabled = false; });
 }
 
+function updateWeiboParseHealth(health) {
+    const healthEl = document.getElementById('cfg-weibo-health');
+    if (!healthEl) return;
+    health = health || {};
+    const ok = health.cookie === true;
+    healthEl.textContent = ok ? t('config_weibo_cookie_configured') : t('config_weibo_cookie_missing');
+    healthEl.classList.toggle('text-primary-500', ok);
+    healthEl.classList.toggle('text-red-500', !ok);
+    healthEl.classList.toggle('text-slate-400', false);
+    healthEl.classList.toggle('dark:text-slate-500', false);
+}
+
+function initWeiboParseConfigView(data) {
+    const cfg = (data && data.config) || {};
+    const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value == null ? '' : value;
+    };
+    initSecretInput(document.getElementById('cfg-weibo-cookie'), cfg.cookie_masked || '');
+    setValue('cfg-weibo-user-agent', cfg.user_agent || '');
+    setValue('cfg-weibo-timeout', cfg.timeout == null ? 20 : cfg.timeout);
+    const clearEl = document.getElementById('cfg-weibo-cookie-clear');
+    if (clearEl) clearEl.checked = false;
+    updateWeiboParseHealth((data && data.health) || {});
+}
+
+function collectWeiboParseConfigPayload() {
+    const getValue = (id) => document.getElementById(id)?.value.trim() || '';
+    const timeoutRaw = getValue('cfg-weibo-timeout');
+    const timeout = parseInt(timeoutRaw || '20', 10);
+    const payload = {
+        user_agent: getValue('cfg-weibo-user-agent'),
+        timeout: Math.max(1, Number.isFinite(timeout) ? timeout : 20),
+    };
+    const cookieEl = document.getElementById('cfg-weibo-cookie');
+    if (cookieEl && cookieEl.dataset.masked !== '1') {
+        payload.cookie = cookieEl.value.trim();
+    }
+    if (document.getElementById('cfg-weibo-cookie-clear')?.checked === true) {
+        payload.cookie_clear = true;
+    }
+    return payload;
+}
+
+function loadWeiboParseConfig() {
+    fetch('/api/weibo-parse').then(r => r.json()).then(data => {
+        if (data.status !== 'success') return;
+        weiboParseConfigState = data;
+        initWeiboParseConfigView(data);
+    }).catch(() => {});
+}
+
+function saveWeiboParseConfig() {
+    const btn = document.getElementById('cfg-weibo-save');
+    if (btn) btn.disabled = true;
+    fetch('/api/weibo-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', config: collectWeiboParseConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') {
+            showStatus('cfg-weibo-status', 'config_saved', false);
+            weiboParseConfigState = data;
+            initWeiboParseConfigView(data);
+        } else {
+            showStatusText('cfg-weibo-status', data.message || t('config_save_error'), true);
+        }
+    })
+    .catch(() => showStatus('cfg-weibo-status', 'config_save_error', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
+function testWeiboParseConfig() {
+    const btn = document.getElementById('cfg-weibo-test');
+    if (btn) btn.disabled = true;
+    fetch('/api/weibo-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test', config: collectWeiboParseConfigPayload() })
+    })
+    .then(r => r.json())
+    .then(data => {
+        const ok = data.status === 'success' && data.ok === true;
+        if (data.status === 'success') {
+            weiboParseConfigState = data;
+            updateWeiboParseHealth(data.health || {});
+        }
+        showStatus('cfg-weibo-status', ok ? 'config_weibo_ok' : 'config_weibo_failed', !ok);
+    })
+    .catch(() => showStatus('cfg-weibo-status', 'config_weibo_failed', true))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
 function loadConfigView() {
     fetch('/config').then(r => r.json()).then(data => {
         if (data.status !== 'success') return;
@@ -5156,6 +5276,7 @@ function loadConfigView() {
         initConfigView(data);
         loadBrowserConfig();
         loadVideoParseConfig();
+        loadWeiboParseConfig();
     }).catch(() => {});
 }
 
@@ -5173,6 +5294,7 @@ const TOOL_ICONS = {
     send: 'fa-paper-plane',
     web_search: 'fa-magnifying-glass',
     browser: 'fa-globe',
+    weibo_parse: 'fa-comment-dots',
     env_config: 'fa-key',
     scheduler: 'fa-clock',
     memory_get: 'fa-brain',
