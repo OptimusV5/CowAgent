@@ -16,10 +16,13 @@ import json
 import logging
 import os
 import re
+import shutil
 import ssl
+import subprocess
 import threading
 # -*- coding=utf-8 -*-
 import uuid
+from datetime import datetime
 
 import requests
 import web
@@ -40,6 +43,9 @@ from config import conf
 logging.getLogger("Lark").setLevel(logging.WARNING)
 
 URL_VERIFICATION = "url_verification"
+FEISHU_AUDIO_ARCHIVE_EXTENSIONS = {
+    ".aac", ".amr", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma",
+}
 
 # Lazy-check for lark_oapi SDK availability without importing it at module level.
 # The full `import lark_oapi` pulls in 10k+ files and takes 4-10s, so we defer
@@ -635,6 +641,9 @@ class FeiShuChanel(ChatChannel):
         logger.debug(f"[FeiShu] query={feishu_msg.content}, type={feishu_msg.ctype}")
 
     def send(self, reply: Reply, context: Context):
+        if reply.type == ReplyType.TEXT:
+            self._archive_feishu_audio_files_if_needed(reply, context)
+
         # 如果文本回复已通过流式传输发送，则跳过重复发送
         if reply.type == ReplyType.TEXT and context.get("feishu_streamed"):
             logger.debug("[FeiShu] streaming already delivered text reply, skipping send()")
@@ -741,6 +750,203 @@ class FeiShuChanel(ChatChannel):
             logger.info(f"[FeiShu] send message success")
         else:
             logger.error(f"[FeiShu] send message failed, code={res.get('code')}, msg={res.get('msg')}")
+
+    def _archive_feishu_audio_files_if_needed(self, reply: Reply, context: Context):
+        if context.get("_feishu_audio_archive_done"):
+            return
+        context["_feishu_audio_archive_done"] = True
+
+        if not conf().get("feishu_audio_archive_enabled", True):
+            return
+
+        context_text = str(context.content or "")
+        reply_text = str(reply.content or "")
+        audio_paths = self._extract_feishu_audio_file_refs(context_text)
+        if not audio_paths:
+            return
+        if not self._looks_like_audio_meeting_summary(context_text, reply_text):
+            logger.info("[FeiShu] Audio archive skipped: reply does not look like an audio meeting summary")
+            return
+
+        title = self._extract_meeting_title(reply_text)
+        message_time = self._feishu_message_datetime(context.get("msg"))
+
+        def _worker(paths: list, archive_title: str, archive_time: datetime):
+            archived = 0
+            for index, audio_path in enumerate(paths, start=1):
+                if self._archive_one_feishu_audio_file(audio_path, archive_title, archive_time, index, len(paths)):
+                    archived += 1
+            if archived:
+                logger.info(f"[FeiShu] Archived {archived}/{len(paths)} audio file(s) via rclone")
+
+        threading.Thread(
+            target=_worker,
+            args=(audio_paths, title, message_time),
+            daemon=True,
+            name="feishu-audio-archive",
+        ).start()
+
+    def _extract_feishu_audio_file_refs(self, text: str) -> list:
+        paths = []
+        seen = set()
+        for match in re.finditer(r"\[(?:文件|语音):\s*([^\]\n]+?)\s*\]", text or ""):
+            path = match.group(1).strip()
+            if path.startswith("file://"):
+                path = path[7:]
+            path = expand_path(path)
+            ext = os.path.splitext(path)[1].lower()
+            if ext not in FEISHU_AUDIO_ARCHIVE_EXTENSIONS:
+                continue
+            real_path = os.path.abspath(path)
+            if real_path in seen:
+                continue
+            if not os.path.isfile(real_path):
+                logger.warning(f"[FeiShu] Audio archive skipped missing file: {real_path}")
+                continue
+            seen.add(real_path)
+            paths.append(real_path)
+        return paths
+
+    def _looks_like_audio_meeting_summary(self, context_text: str, reply_text: str) -> bool:
+        combined = f"{context_text}\n{reply_text}"
+        if re.search(r"(会议|纪要|总结|摘要|转写|转录|录音|音频|语音)", combined):
+            return True
+        return False
+
+    def _extract_meeting_title(self, text: str) -> str:
+        patterns = (
+            r"^\s*#\s+(.+?)\s*$",
+            r"^\s*\*\*(?:会议纪要标题|会议标题|标题|主题)[:：]\*\*\s*(.+?)\s*$",
+            r"^\s*(?:会议纪要标题|会议标题|标题|主题)[:：]\s*(.+?)\s*$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text or "", flags=re.MULTILINE)
+            if match:
+                title = self._sanitize_audio_archive_title(match.group(1))
+                if title:
+                    return title
+
+        for line in (text or "").splitlines():
+            cleaned = self._sanitize_audio_archive_title(line)
+            if cleaned and len(cleaned) <= 60 and not cleaned.startswith(("以下", "好的", "根据")):
+                return cleaned
+        return "会议纪要"
+
+    def _sanitize_audio_archive_title(self, title: str) -> str:
+        title = re.sub(r"^[#*\-\s>]+", "", str(title or "")).strip()
+        title = re.sub(r"[*_`~\[\]（）()【】]+", "", title).strip()
+        title = re.sub(r"[\\/:*?\"<>|]", "_", title)
+        title = re.sub(r"\s+", "_", title).strip("._- ")
+        if not title:
+            return ""
+        return title[:80]
+
+    def _feishu_message_datetime(self, msg) -> datetime:
+        value = getattr(msg, "create_time", "") if msg else ""
+        try:
+            timestamp = int(value)
+            if timestamp > 10_000_000_000:
+                timestamp = timestamp / 1000
+            return datetime.fromtimestamp(timestamp)
+        except Exception:
+            return datetime.now()
+
+    def _archive_one_feishu_audio_file(
+        self,
+        audio_path: str,
+        title: str,
+        message_time: datetime,
+        index: int,
+        total: int,
+    ) -> bool:
+        rclone_bin = conf().get("feishu_audio_archive_rclone_bin", "rclone") or "rclone"
+        if os.path.sep not in rclone_bin and shutil.which(rclone_bin) is None:
+            logger.warning(f"[FeiShu] Audio archive skipped: rclone not found: {rclone_bin}")
+            return False
+
+        remote_dir = self._feishu_audio_archive_remote_dir(message_time)
+        mkdir_cmd = [rclone_bin, "mkdir", remote_dir]
+        if not self._run_rclone_command(mkdir_cmd, "mkdir"):
+            return False
+
+        filename = self._audio_archive_filename(audio_path, title, message_time, index, total)
+        remote_path = f"{remote_dir.rstrip('/')}/{filename}"
+        copy_cmd = [rclone_bin, "copyto", audio_path, remote_path]
+        if not self._run_rclone_command(copy_cmd, "copyto"):
+            return False
+
+        if conf().get("feishu_audio_archive_delete_local_on_success", True):
+            self._delete_feishu_audio_temp_file(audio_path)
+        logger.info(f"[FeiShu] Audio archived: {audio_path} -> {remote_path}")
+        return True
+
+    def _feishu_audio_archive_remote_dir(self, message_time: datetime) -> str:
+        remote = str(conf().get("feishu_audio_archive_rclone_remote", "alistdav") or "alistdav").strip()
+        base_dir = str(conf().get("feishu_audio_archive_base_dir", "/quark/COW") or "/quark/COW").strip()
+        remote = remote.rstrip(":")
+        base_dir = "/" + base_dir.strip("/")
+        month_dir = message_time.strftime("%Y-%m")
+        return f"{remote}:{base_dir}/{month_dir}"
+
+    def _audio_archive_filename(
+        self,
+        audio_path: str,
+        title: str,
+        message_time: datetime,
+        index: int,
+        total: int,
+    ) -> str:
+        ext = os.path.splitext(audio_path)[1].lower() or ".audio"
+        suffix = message_time.strftime("%Y%m%d_%H%M%S")
+        name = f"{title}_{suffix}"
+        if total > 1:
+            name = f"{name}_{index:02d}"
+        return f"{name}{ext}"
+
+    def _run_rclone_command(self, cmd: list, action: str) -> bool:
+        timeout = self._int_config("feishu_audio_archive_rclone_timeout", 300)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(f"[FeiShu] Audio archive rclone {action} timed out: {' '.join(cmd)}")
+            return False
+        except Exception as e:
+            logger.warning(f"[FeiShu] Audio archive rclone {action} failed: {e}")
+            return False
+
+        if result.returncode != 0:
+            stderr = (result.stderr or result.stdout or "").strip()
+            logger.warning(
+                f"[FeiShu] Audio archive rclone {action} failed: "
+                f"returncode={result.returncode}, output={stderr[:500]}"
+            )
+            return False
+        return True
+
+    def _delete_feishu_audio_temp_file(self, audio_path: str):
+        workspace_root = os.path.abspath(expand_path(conf().get("agent_workspace", "~/cow")))
+        tmp_root = os.path.abspath(os.path.join(workspace_root, "tmp"))
+        abs_path = os.path.abspath(audio_path)
+        try:
+            common_path = os.path.commonpath([tmp_root, abs_path])
+        except Exception:
+            common_path = ""
+        if common_path != tmp_root:
+            logger.warning(f"[FeiShu] Audio archive kept non-temp local file: {abs_path}")
+            return
+        try:
+            os.remove(abs_path)
+            logger.info(f"[FeiShu] Audio archive removed local temp file: {abs_path}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"[FeiShu] Audio archive failed to remove local temp file {abs_path}: {e}")
 
     def _make_feishu_stream_callback(self, context, access_token):
         """
