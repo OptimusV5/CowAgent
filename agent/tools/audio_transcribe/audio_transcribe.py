@@ -13,7 +13,9 @@ class AudioTranscribe(BaseTool):
         "Transcribe a local audio or voice file to text using CowAgent's configured speech recognition provider. "
         "Use this whenever the user asks to convert, transcribe, recognize, or understand an audio/voice file. "
         "Do not inspect env_config or call OpenAI/curl audio APIs yourself; this tool uses the Models page ASR configuration. "
-        "When the conversation provides temporary domain terms, names, or correction rules, pass hotwords and replace_json for this call only."
+        "When the conversation provides temporary domain terms, names, or correction rules, pass hotwords and replace_json for this call only. "
+        "When you transcribe an uploaded audio file for a meeting summary or meeting minutes, use the returned file_path "
+        "to call audio_archive after you finish generating the summary/title."
     )
     params: dict = {
         "type": "object",
@@ -72,5 +74,8 @@ class AudioTranscribe(BaseTool):
         if reply is None:
             return ToolResult.fail("Error: ASR returned no result")
         if reply.type == ReplyType.TEXT:
-            return ToolResult.success({"text": reply.content or ""})
+            return ToolResult.success({
+                "text": reply.content or "",
+                "file_path": file_path,
+            })
         return ToolResult.fail(reply.content or "Error: ASR failed")

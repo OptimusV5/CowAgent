@@ -10,6 +10,7 @@ from agent.tools.bash.bash import Bash
 from agent.tools.ls.ls import Ls
 from agent.tools.send.send import Send
 from agent.tools.audio_transcribe.audio_transcribe import AudioTranscribe
+from agent.tools.audio_archive.audio_archive import AudioArchiveTool
 from agent.tools.video_parse.video_parse import VideoParseTool
 from agent.tools.weibo_parse.weibo_parse import WeiboParseTool
 
@@ -140,6 +141,7 @@ __all__ = [
     'Ls',
     'Send',
     'AudioTranscribe',
+    'AudioArchiveTool',
     'VideoParseTool',
     'WeiboParseTool',
     'MemorySearchTool',

@@ -189,12 +189,6 @@ available_setting = {
     "feishu_quote_max_chars": 4000,  # max chars of quoted text attached to the prompt
     "feishu_quote_fetch_timeout": 5,  # timeout seconds for fetching quoted Feishu messages/resources
     "feishu_quote_download_media": True,  # whether to download quoted images/files/videos and attach local paths
-    "feishu_audio_archive_enabled": True,  # archive Feishu audio file attachments after meeting-summary replies
-    "feishu_audio_archive_rclone_bin": "rclone",  # rclone executable path/name
-    "feishu_audio_archive_rclone_remote": "alistdav",  # rclone remote name for archived audio
-    "feishu_audio_archive_base_dir": "/quark/COW",  # remote base directory for archived audio
-    "feishu_audio_archive_delete_local_on_success": True,  # delete local tmp audio after successful rclone copy
-    "feishu_audio_archive_rclone_timeout": 300,  # timeout seconds for rclone mkdir/copyto
     # DingTalk config
     "dingtalk_client_id": "",  # DingTalk bot Client ID
     "dingtalk_client_secret": "",  # DingTalk bot Client Secret

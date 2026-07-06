@@ -38,12 +38,6 @@
   "feishu_quote_max_chars": 4000,
   "feishu_quote_fetch_timeout": 5,
   "feishu_quote_download_media": true,
-  "feishu_audio_archive_enabled": true,
-  "feishu_audio_archive_rclone_bin": "rclone",
-  "feishu_audio_archive_rclone_remote": "alistdav",
-  "feishu_audio_archive_base_dir": "/quark/COW",
-  "feishu_audio_archive_delete_local_on_success": true,
-  "feishu_audio_archive_rclone_timeout": 300,
   "dingtalk_client_id": "",
   "dingtalk_client_secret": "",
   "wecom_bot_id": "",
@@ -85,6 +79,14 @@
       "cookie": "",
       "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
       "timeout": 20
+    },
+    "audio_archive": {
+      "enabled": true,
+      "rclone_bin": "rclone",
+      "rclone_remote": "alistdav",
+      "base_dir": "/quark/COW",
+      "delete_local_on_success": true,
+      "timeout": 300
     }
   }
 }
