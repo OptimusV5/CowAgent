@@ -818,6 +818,7 @@ class FeiShuChanel(ChatChannel):
             r"^\s*#\s+(.+?)\s*$",
             r"^\s*\*\*(?:会议纪要标题|会议标题|标题|主题)[:：]\*\*\s*(.+?)\s*$",
             r"^\s*(?:会议纪要标题|会议标题|标题|主题)[:：]\s*(.+?)\s*$",
+            r"(?:[_*\s]*Word[_*\s]*版)?(?:会议纪要|纪要文档|会议总结)(?:文档|文件)?\s*[:：]\s*([^\n。；;]+)",
         )
         for pattern in patterns:
             match = re.search(pattern, text or "", flags=re.MULTILINE)
@@ -825,16 +826,14 @@ class FeiShuChanel(ChatChannel):
                 title = self._sanitize_audio_archive_title(match.group(1))
                 if title:
                     return title
-
-        for line in (text or "").splitlines():
-            cleaned = self._sanitize_audio_archive_title(line)
-            if cleaned and len(cleaned) <= 60 and not cleaned.startswith(("以下", "好的", "根据")):
-                return cleaned
         return "会议纪要"
 
     def _sanitize_audio_archive_title(self, title: str) -> str:
         title = re.sub(r"^[#*\-\s>]+", "", str(title or "")).strip()
+        title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)
+        title = re.sub(r"\.(?:docx?|pdf|md|txt|wav|mp3|m4a|opus)\s*$", "", title, flags=re.IGNORECASE)
         title = re.sub(r"[*_`~\[\]（）()【】]+", "", title).strip()
+        title = re.sub(r"^(?:哥[,，\s]*)?(?:已完成并发送|已生成|已发送|生成完成)[,，\s]*", "", title)
         title = re.sub(r"[\\/:*?\"<>|]", "_", title)
         title = re.sub(r"\s+", "_", title).strip("._- ")
         if not title:
