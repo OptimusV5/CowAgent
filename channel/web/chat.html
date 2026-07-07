@@ -660,6 +660,18 @@
                                         <span id="cfg-browser-health" class="ml-auto text-xs text-slate-400 dark:text-slate-500"></span>
                                     </div>
                                     <div class="space-y-4">
+                                        <div class="flex items-center justify-between gap-4">
+                                            <div>
+                                                <span class="text-sm font-medium text-slate-600 dark:text-slate-400" data-i18n="config_browser_enabled">启用浏览器工具</span>
+                                                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_enabled_hint">关闭后，Agent 不会看到 browser 工具，已有浏览器会被释放。</p>
+                                            </div>
+                                            <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                                                <input id="cfg-browser-enabled" type="checkbox" class="sr-only peer">
+                                                <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                            after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                            after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                            </label>
+                                        </div>
                                         <div>
                                             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_browser_engine">浏览器后端</label>
                                             <div id="cfg-browser-engine" class="cfg-dropdown" tabindex="0">

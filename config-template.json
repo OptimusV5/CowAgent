@@ -54,6 +54,7 @@
   "self_evolution_enabled": true,
   "tools": {
     "browser": {
+      "enabled": true,
       "engine": "playwright",
       "backend_proxy": "",
       "proxy_default": false,

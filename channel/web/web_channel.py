@@ -3718,6 +3718,7 @@ class BrowserConfigHandler:
     @staticmethod
     def _default_browser_config() -> dict:
         return {
+            "enabled": True,
             "engine": "playwright",
             "playwright": {
                 "persistent": True,
@@ -3908,6 +3909,10 @@ class BrowserConfigHandler:
                 tm.tool_configs = {}
             tm.tool_configs["browser"] = browser_cfg
             from agent.tools.browser.browser_tool import BrowserTool
+            if browser_cfg.get("enabled", True) is False:
+                tm.tool_classes.pop("browser", None)
+            elif "browser" not in tm.tool_classes:
+                tm.tool_classes["browser"] = BrowserTool
             BrowserTool.reset_shared_service()
             logger.info("[BrowserConfig] Browser tool runtime config refreshed")
         except Exception as e:
@@ -3981,6 +3986,7 @@ class BrowserConfigHandler:
             engine = (cfg.get("engine") or "playwright").strip().lower()
             if engine not in ("playwright", "camofox", "camoufox", "auto"):
                 return json.dumps({"status": "error", "message": f"invalid engine: {engine}"})
+            cfg["enabled"] = cfg.get("enabled", True) is not False
             cfg["engine"] = engine
             try:
                 cfg["backend_proxy"] = normalize_proxy_url(cfg.get("backend_proxy", ""))

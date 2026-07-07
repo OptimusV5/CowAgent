@@ -206,6 +206,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "send": "send a local file to the user (local files only; put URLs directly in the reply text)",
             "vision": "analyze images (recognition, description, OCR, etc.)",
             "audio_transcribe": "transcribe local audio/voice files using the configured ASR provider",
+            "audio_archive": "archive a transcribed meeting audio file to configured cloud storage",
         }
     else:
         core_summaries = {
@@ -227,6 +228,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "send": "发送本地文件给用户（仅限本地文件，URL直接放在回复文本中）",
             "vision": "分析图片内容（识别、描述、OCR文字提取等）",
             "audio_transcribe": "使用已配置的语音识别服务转写本地音频/语音文件",
+            "audio_archive": "将已转写的会议音频归档到已配置的网盘/云存储",
         }
 
     # Preferred display order
@@ -235,7 +237,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
         "bash", "terminal",
         "web_search", "web_fetch", "browser",
         "memory_search", "memory_get",
-        "env_config", "scheduler", "send", "vision", "audio_transcribe",
+        "env_config", "scheduler", "send", "vision", "audio_transcribe", "audio_archive",
     ]
 
     # Build name -> summary mapping for available tools
@@ -268,6 +270,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "- Always redact secrets, tokens and other sensitive info in replies",
             "- Put URLs directly in the reply text; the system handles and renders them. Don't download and re-send them via the send tool",
             "- For audio or voice file transcription, use audio_transcribe first. Do not inspect env_config or call speech/audio APIs manually",
+            "- For uploaded meeting audio: call audio_transcribe, generate the meeting summary/title, then call audio_archive with the returned file_path and the final title",
             "",
         ]
     else:
@@ -284,6 +287,7 @@ def _build_tooling_section(tools: List[Any], language: str) -> List[str]:
             "- 回复中涉及密钥、令牌等敏感信息必须脱敏",
             "- URL链接直接放在回复文本中即可，系统会自动处理和渲染。无需下载后使用send工具发送",
             "- 音频/语音文件转文字时，优先使用 audio_transcribe。不要先查 env_config，也不要手动调用语音/音频 API",
+            "- 上传音频用于会议总结/会议纪要时：先调用 audio_transcribe，生成纪要和标题后，必须调用 audio_archive，并传入 audio_transcribe 返回的 file_path 与最终标题",
             "",
         ]
 

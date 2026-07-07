@@ -230,6 +230,8 @@ class ToolManager:
         try:
             # Get tools configuration
             tools_config = config_dict or conf().get("tools", {})
+            if not isinstance(tools_config, dict):
+                tools_config = {}
 
             # Record tools that are configured but not loaded
             missing_tools = []
@@ -237,8 +239,15 @@ class ToolManager:
             # Store configurations for later use when instantiating
             self.tool_configs = tools_config
 
+            if not self._is_tool_enabled("browser", tools_config):
+                if "browser" in self.tool_classes:
+                    self.tool_classes.pop("browser", None)
+                    logger.info("[ToolManager] Browser tool disabled by tools.browser.enabled=false")
+
             # Check which configured tools are missing
             for tool_name in tools_config:
+                if not self._is_tool_enabled(tool_name, tools_config):
+                    continue
                 if tool_name not in self.tool_classes:
                     missing_tools.append(tool_name)
 
@@ -263,6 +272,13 @@ class ToolManager:
 
         except Exception as e:
             logger.error(f"Error configuring tools from config: {e}")
+
+    def _is_tool_enabled(self, tool_name: str, tools_config: dict = None) -> bool:
+        tools = tools_config if isinstance(tools_config, dict) else getattr(self, "tool_configs", {})
+        cfg = tools.get(tool_name) if isinstance(tools, dict) else None
+        if isinstance(cfg, dict) and cfg.get("enabled") is False:
+            return False
+        return True
 
     def _mcp_json_path(self) -> str:
         import os
@@ -571,6 +587,8 @@ class ToolManager:
         :param name: The name of the tool to get.
         :return: A new instance of the tool or None if not found.
         """
+        if not self._is_tool_enabled(name):
+            return None
         tool_class = self.tool_classes.get(name)
         if tool_class:
             # Create a new instance
@@ -597,6 +615,8 @@ class ToolManager:
         """
         result = {}
         for name, tool_class in self.tool_classes.items():
+            if not self._is_tool_enabled(name):
+                continue
             # Create a temporary instance to get schema
             temp_instance = tool_class()
             result[name] = {

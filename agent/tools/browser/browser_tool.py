@@ -147,6 +147,10 @@ class BrowserTool(BaseTool):
             logger.debug(f"[Browser] Failed to read runtime browser config: {e}")
         return self.config
 
+    def _is_enabled(self) -> bool:
+        config = _normalize_browser_config(self._effective_config())
+        return config.get("enabled", True) is not False
+
     def _validate_use_proxy(self, use_proxy: Optional[bool]) -> Optional[ToolResult]:
         if use_proxy is not True:
             return None
@@ -213,6 +217,10 @@ class BrowserTool(BaseTool):
         return self._service
 
     def execute(self, args: Dict[str, Any]) -> ToolResult:
+        if not self._is_enabled():
+            BrowserTool.reset_shared_service()
+            return ToolResult.fail("Error: browser tool is disabled in tools.browser.enabled")
+
         action = args.get("action", "").strip().lower()
         if not action:
             return ToolResult.fail("Error: 'action' parameter is required")

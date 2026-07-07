@@ -20,6 +20,7 @@ import ssl
 import threading
 # -*- coding=utf-8 -*-
 import uuid
+from urllib.parse import unquote, urlparse
 
 import requests
 import web
@@ -28,7 +29,7 @@ from bridge.context import Context
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel, check_prefix
-from channel.feishu.feishu_message import FeishuMessage
+from channel.feishu.feishu_message import FeishuDownloadError, FeishuFileTooLargeError, FeishuMessage
 from common import utils
 from common.expired_dict import ExpiredDict
 from common.log import logger
@@ -40,6 +41,7 @@ from config import conf
 logging.getLogger("Lark").setLevel(logging.WARNING)
 
 URL_VERIFICATION = "url_verification"
+FEISHU_DRIVE_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
 
 # Lazy-check for lark_oapi SDK availability without importing it at module level.
 # The full `import lark_oapi` pulls in 10k+ files and takes 4-10s, so we defer
@@ -554,18 +556,34 @@ class FeiShuChanel(ChatChannel):
                 # prepare 通过 _prepared 标记保证幂等，重复调用安全
                 if not os.path.exists(feishu_msg.content):
                     raise FileNotFoundError(feishu_msg.content)
+            except FeishuFileTooLargeError as e:
+                logger.warning(f"[FeiShu] IM attachment too large: {e}")
+                self._send_feishu_download_notice(
+                    receive_id_type,
+                    is_group,
+                    feishu_msg,
+                    "⚠️ 这个聊天附件超过飞书 IM 附件下载接口 100MB 限制，机器人无法通过聊天附件接口直接下载。\n"
+                    "如果这是飞书云空间文件，请直接发送云空间文件链接或云空间文件卡片，我会自动提取 file_token 并用 Drive 分片下载。"
+                )
+                return
+            except FeishuDownloadError as e:
+                logger.warning(f"[FeiShu] prepare file failed: {e}")
+                self._send_feishu_download_notice(
+                    receive_id_type,
+                    is_group,
+                    feishu_msg,
+                    f"⚠️ 文件下载失败：{e}"
+                )
+                return
             except Exception as e:
                 logger.warning(f"[FeiShu] prepare file failed: {e}")
                 # 文件下载失败时主动通知用户，避免静默丢失
-                try:
-                    err_reply = Reply(ReplyType.TEXT, f"⚠️ 文件下载失败，请重新发送：{e}")
-                    self._send(err_reply, self._compose_context(
-                        ContextType.TEXT, "",
-                        isgroup=is_group, msg=feishu_msg,
-                        receive_id_type=receive_id_type, no_need_at=True,
-                    ))
-                except Exception:
-                    pass
+                self._send_feishu_download_notice(
+                    receive_id_type,
+                    is_group,
+                    feishu_msg,
+                    f"⚠️ 文件下载失败，请重新发送：{e}"
+                )
                 return
             cached_file_type = getattr(feishu_msg, "file_type", "file")
             resource_key = self._feishu_message_resource_key(feishu_msg)
@@ -592,6 +610,42 @@ class FeiShuChanel(ChatChannel):
                     feishu_msg.content,
                 ).strip()
                 logger.info(f"[FeiShu] Attached quote context to message, has_attachment={quote_attached}")
+
+        if feishu_msg.ctype == ContextType.TEXT:
+            drive_scan_text = "\n".join(
+                part for part in (feishu_msg.content, getattr(feishu_msg, "raw_content", "") or "") if part
+            )
+            drive_files, drive_errors = self._download_drive_files_from_text(
+                drive_scan_text,
+                feishu_msg.access_token,
+            )
+            if drive_files:
+                file_refs = [self._format_file_ref(item["file_type"], item["path"]) for item in drive_files]
+                content_without_links = self._remove_drive_links_from_text(feishu_msg.content).strip()
+                has_user_instruction = bool(content_without_links and content_without_links not in ("[当前消息]",))
+                if has_user_instruction:
+                    feishu_msg.content = feishu_msg.content + "\n" + "\n".join(file_refs)
+                    logger.info(f"[FeiShu] Attached {len(drive_files)} Drive file(s) to current text message")
+                else:
+                    for item in drive_files:
+                        file_cache.add(
+                            session_id,
+                            item["path"],
+                            file_type=item["file_type"],
+                            channel="feishu_drive",
+                            file_token=item.get("file_token"),
+                            file_name=item.get("file_name") or os.path.basename(item["path"]),
+                        )
+                    logger.info(f"[FeiShu] Cached {len(drive_files)} Drive file(s), waiting for user query")
+                    return
+            elif drive_errors:
+                self._send_feishu_download_notice(
+                    receive_id_type,
+                    is_group,
+                    feishu_msg,
+                    "⚠️ 云空间文件下载失败：\n" + "\n".join(f"- {err}" for err in drive_errors[:3])
+                )
+                return
 
         # 如果是文本消息，检查是否有缓存的文件
         if feishu_msg.ctype == ContextType.TEXT:
@@ -633,6 +687,236 @@ class FeiShuChanel(ChatChannel):
                 context["on_event"] = self._make_feishu_stream_callback(context, feishu_msg.access_token)
             self.produce(context)
         logger.debug(f"[FeiShu] query={feishu_msg.content}, type={feishu_msg.ctype}")
+
+    def _send_feishu_download_notice(
+        self,
+        receive_id_type: str,
+        is_group: bool,
+        feishu_msg: FeishuMessage,
+        text: str,
+    ):
+        try:
+            err_reply = Reply(ReplyType.TEXT, text)
+            self._send(err_reply, self._compose_context(
+                ContextType.TEXT,
+                "",
+                isgroup=is_group,
+                msg=feishu_msg,
+                receive_id_type=receive_id_type,
+                no_need_at=True,
+            ))
+        except Exception as e:
+            logger.warning(f"[FeiShu] Failed to send download notice: {e}")
+
+    def _download_drive_files_from_text(self, text: str, access_token: str):
+        links = self._extract_feishu_drive_file_links(text)
+        if not links:
+            return [], []
+
+        files = []
+        errors = []
+        seen_tokens = set()
+        for link in links:
+            file_token = link.get("file_token")
+            if not file_token or file_token in seen_tokens:
+                continue
+            seen_tokens.add(file_token)
+            try:
+                item = self._download_drive_file_by_token(file_token, access_token)
+                if item:
+                    files.append(item)
+            except Exception as e:
+                logger.warning(f"[FeiShu] Drive file download failed, token={file_token}: {e}")
+                errors.append(f"{file_token}: {e}")
+        return files, errors
+
+    def _extract_feishu_drive_file_links(self, text: str) -> list:
+        if not text:
+            return []
+
+        url_pattern = re.compile(r"https?://[^\s<>\]\)\"']+")
+        links = []
+        for match in url_pattern.finditer(text):
+            raw_url = match.group(0).rstrip("，。；;,.")
+            parsed = urlparse(raw_url)
+            host = parsed.netloc.lower()
+            if not (
+                host.endswith("feishu.cn")
+                or host.endswith("larksuite.com")
+                or host.endswith("larksuite.cn")
+            ):
+                continue
+            if host == "open.feishu.cn":
+                continue
+
+            path = unquote(parsed.path or "")
+            token_match = re.search(r"/(?:drive/)?file/([A-Za-z0-9_-]+)", path)
+            if not token_match:
+                continue
+            links.append({
+                "url": raw_url,
+                "file_token": token_match.group(1),
+            })
+        for match in re.finditer(r'["\']?file_token["\']?\s*[:=]\s*["\']?([A-Za-z0-9_-]+)', text):
+            token = match.group(1)
+            if token:
+                links.append({
+                    "url": "",
+                    "file_token": token,
+                })
+        return links
+
+    def _remove_drive_links_from_text(self, text: str) -> str:
+        cleaned = text or ""
+        for link in self._extract_feishu_drive_file_links(cleaned):
+            cleaned = cleaned.replace(link.get("url") or "", "")
+        return cleaned.strip()
+
+    def _download_drive_file_by_token(self, file_token: str, access_token: str) -> dict:
+        if not file_token:
+            raise ValueError("file_token is empty")
+
+        chunk_size = max(1024 * 1024, self._int_config(
+            "feishu_drive_download_chunk_size",
+            FEISHU_DRIVE_DOWNLOAD_CHUNK_SIZE,
+        ))
+        timeout = (self._int_config("feishu_quote_fetch_timeout", 5), 120)
+        url = f"https://open.feishu.cn/open-apis/drive/v1/files/{file_token}/download"
+        auth_headers = {"Authorization": "Bearer " + access_token}
+
+        first_headers = dict(auth_headers)
+        first_headers["Range"] = f"bytes=0-{chunk_size - 1}"
+        response = requests.get(url=url, headers=first_headers, stream=True, timeout=timeout)
+        if response.status_code not in (200, 206):
+            error = self._feishu_api_error(response, "Drive 文件下载失败")
+            raise FeishuDownloadError(error)
+
+        file_name = self._drive_filename_from_headers(response.headers) or f"drive_{file_token}.bin"
+        file_name = self._safe_filename(file_name)
+        local_path = self._drive_file_local_path(file_token, file_name)
+        part_path = local_path + ".part"
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+        total = None
+        next_start = 0
+        try:
+            with open(part_path, "wb") as f:
+                if response.status_code == 200:
+                    self._write_response_chunks(response, f)
+                    next_start = os.path.getsize(part_path)
+                else:
+                    _, end, total = self._parse_content_range(response.headers.get("Content-Range") or "")
+                    if end is None or total is None:
+                        raise FeishuDownloadError("Drive 文件分片响应缺少 Content-Range")
+                    self._write_response_chunks(response, f)
+                    next_start = end + 1
+
+                while total is not None and next_start < total:
+                    end = min(next_start + chunk_size - 1, total - 1)
+                    headers = dict(auth_headers)
+                    headers["Range"] = f"bytes={next_start}-{end}"
+                    chunk_response = requests.get(url=url, headers=headers, stream=True, timeout=timeout)
+                    if chunk_response.status_code != 206:
+                        error = self._feishu_api_error(chunk_response, "Drive 文件分片下载失败")
+                        raise FeishuDownloadError(error)
+                    range_start, range_end, range_total = self._parse_content_range(
+                        chunk_response.headers.get("Content-Range") or ""
+                    )
+                    if range_start is not None and range_start != next_start:
+                        raise FeishuDownloadError(
+                            f"Drive 文件分片响应范围不连续: expected={next_start}, actual={range_start}"
+                        )
+                    if range_total is not None:
+                        total = range_total
+                    self._write_response_chunks(chunk_response, f)
+                    next_start = (range_end + 1) if range_end is not None else os.path.getsize(part_path)
+        except Exception:
+            try:
+                if os.path.exists(part_path):
+                    os.remove(part_path)
+            except Exception:
+                pass
+            raise
+
+        os.replace(part_path, local_path)
+        if not self._is_usable_file(local_path):
+            raise FeishuDownloadError("Drive 文件下载后为空")
+
+        file_type = self._infer_file_type_from_path(local_path)
+        logger.info(
+            f"[FeiShu] Drive file downloaded: token={file_token}, path={local_path}, "
+            f"size={os.path.getsize(local_path)}, type={file_type}"
+        )
+        return {
+            "path": local_path,
+            "file_type": file_type,
+            "file_token": file_token,
+            "file_name": file_name,
+        }
+
+    def _write_response_chunks(self, response, target_file):
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                target_file.write(chunk)
+
+    def _parse_content_range(self, value: str):
+        match = re.match(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", value or "")
+        if not match:
+            return None, None, None
+        start = int(match.group(1))
+        end = int(match.group(2))
+        total = None if match.group(3) == "*" else int(match.group(3))
+        return start, end, total
+
+    def _drive_filename_from_headers(self, headers) -> str:
+        disposition = headers.get("Content-Disposition") or headers.get("content-disposition") or ""
+        if not disposition:
+            return ""
+        filename_star = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.I)
+        if filename_star:
+            return unquote(filename_star.group(1).strip().strip('"'))
+        filename = re.search(r'filename="?([^";]+)"?', disposition, re.I)
+        if filename:
+            return unquote(filename.group(1).strip())
+        return ""
+
+    def _safe_filename(self, filename: str) -> str:
+        name = os.path.basename(filename or "").strip()
+        name = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", name)
+        name = re.sub(r"\s+", " ", name).strip(" .")
+        return name[:180] or "file.bin"
+
+    def _drive_file_local_path(self, file_token: str, file_name: str) -> str:
+        workspace_root = expand_path(conf().get("agent_workspace", "~/cow"))
+        tmp_dir = os.path.join(workspace_root, "tmp", "feishu_drive")
+        base, ext = os.path.splitext(file_name)
+        if not ext:
+            ext = ".bin"
+        safe_base = self._safe_filename(base or f"drive_{file_token}")
+        return os.path.join(tmp_dir, f"{file_token}_{safe_base}{ext}")
+
+    def _infer_file_type_from_path(self, path: str) -> str:
+        suffix = os.path.splitext(path or "")[1].lower()
+        if suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff"}:
+            return "image"
+        if suffix in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}:
+            return "video"
+        if suffix in {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".amr", ".wma"}:
+            return "audio"
+        return "file"
+
+    def _feishu_api_error(self, response, fallback: str) -> str:
+        try:
+            data = response.json()
+            code = data.get("code")
+            msg = data.get("msg") or fallback
+            if code == 234037:
+                return "该聊天附件超过飞书消息资源下载接口 100MB 限制，无法通过 IM 附件接口直接下载。"
+            if code in (99991663, 99991664, 99991668, 99991672):
+                return f"{msg}。请确认机器人有云空间文件下载权限，且文件已对机器人/所在会话开放。"
+            return f"{msg} (code={code})" if code else msg
+        except Exception:
+            return f"{fallback}: HTTP {response.status_code}"
 
     def send(self, reply: Reply, context: Context):
         # 如果文本回复已通过流式传输发送，则跳过重复发送
@@ -1356,8 +1640,15 @@ class FeiShuChanel(ChatChannel):
                 for element in block:
                     if element.get("tag") == "text" and element.get("text"):
                         text_parts.append(str(element.get("text")))
-                    elif element.get("tag") == "a" and element.get("text"):
-                        text_parts.append(str(element.get("text")))
+                    elif element.get("tag") == "a":
+                        link_text = str(element.get("text") or "")
+                        href = str(element.get("href") or element.get("url") or "")
+                        if link_text and href:
+                            text_parts.append(f"{link_text} {href}")
+                        elif href:
+                            text_parts.append(href)
+                        elif link_text:
+                            text_parts.append(link_text)
                     elif element.get("tag") == "at":
                         text_parts.append(str(element.get("user_name") or element.get("user_id") or ""))
                     elif element.get("tag") == "code_block" and element.get("text"):
@@ -1448,15 +1739,30 @@ class FeiShuChanel(ChatChannel):
                 out.append(str(node.get("content")))
             elif tag == "button":
                 self._collect_feishu_card_text(node.get("text"), out)
+                url = node.get("url") or node.get("href") or node.get("link")
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    out.append(url)
             elif tag == "text":
                 text = node.get("text")
                 if isinstance(text, str):
                     out.append(text)
                 else:
                     self._collect_feishu_card_text(text, out)
+            elif tag == "a":
+                href = node.get("href") or node.get("url") or node.get("link")
+                text = node.get("text") or node.get("content") or ""
+                if text and href:
+                    out.append(f"{text} {href}")
+                elif href:
+                    out.append(str(href))
+                elif text:
+                    out.append(str(text))
             elif tag == "note":
                 self._collect_feishu_card_text(node.get("elements"), out)
             else:
+                url = node.get("url") or node.get("href") or node.get("link")
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    out.append(url)
                 for key in ("title", "subtitle", "content", "text", "elements", "body", "header", "columns", "items", "fields"):
                     value = node.get(key)
                     if value is not None:
@@ -1585,24 +1891,27 @@ class FeiShuChanel(ChatChannel):
                     url=url,
                     headers=headers,
                     params={"type": candidate},
+                    stream=True,
                     timeout=(self._int_config("feishu_quote_fetch_timeout", 5), 60),
                 )
                 last_response = response
                 logger.info(
                     f"[FeiShu] download quote resource response: msg_id={message_id}, "
-                    f"key={resource_key}, type={candidate}, status={response.status_code}, size={len(response.content)}"
+                    f"key={resource_key}, type={candidate}, status={response.status_code}, "
+                    f"size={response.headers.get('Content-Length', 'unknown')}"
                 )
                 if response.status_code == 200:
                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
                     with open(target_path, "wb") as f:
-                        f.write(response.content)
+                        self._write_response_chunks(response, f)
                     return self._is_usable_file(target_path)
             except Exception as e:
                 logger.warning(f"[FeiShu] Exception downloading quote resource, msg_id={message_id}, key={resource_key}, type={candidate}: {e}")
         if last_response is not None:
+            error = self._feishu_api_error(last_response, "引用附件下载失败")
             logger.warning(
                 f"[FeiShu] Failed to download quote resource, msg_id={message_id}, "
-                f"key={resource_key}, status={last_response.status_code}, res={last_response.text[:300]}"
+                f"key={resource_key}, status={last_response.status_code}, error={error}"
             )
         return False
 

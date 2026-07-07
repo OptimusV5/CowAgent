@@ -146,6 +146,8 @@ const I18N = {
         config_title: '配置管理', config_desc: '管理模型和 Agent 配置',
         config_model: '模型配置', config_agent: 'Agent 配置',
         config_browser: '浏览器工具',
+        config_browser_enabled: '启用浏览器工具',
+        config_browser_enabled_hint: '关闭后，Agent 不会看到 browser 工具，已有浏览器会被释放。',
         config_browser_engine: '浏览器后端',
         config_browser_managed: '托管进程',
         config_browser_autostart: '自动启动',
@@ -449,6 +451,8 @@ const I18N = {
         config_title: 'Configuration', config_desc: 'Manage model and agent settings',
         config_model: 'Model Configuration', config_agent: 'Agent Configuration',
         config_browser: 'Browser Tool',
+        config_browser_enabled: 'Enable Browser Tool',
+        config_browser_enabled_hint: 'When disabled, the agent cannot see the browser tool and any active browser is released.',
         config_browser_engine: 'Browser Backend',
         config_browser_managed: 'Managed Process',
         config_browser_autostart: 'Auto Start',
@@ -4694,6 +4698,9 @@ function initBrowserConfigView(data) {
     ], engine, updateBrowserBackendVisibility);
     updateBrowserBackendVisibility(engine);
 
+    const enabledEl = document.getElementById('cfg-browser-enabled');
+    if (enabledEl) enabledEl.checked = cfg.enabled !== false;
+
     const camofox = cfg.camofox || {};
     const camoufox = cfg.camoufox || {};
     const playwright = cfg.playwright || {};
@@ -4768,6 +4775,7 @@ function collectBrowserConfigPayload() {
     const camoufoxIdleRaw = document.getElementById('cfg-camoufox-idle-timeout')?.value;
     const camoufoxIdleParsed = parseInt(camoufoxIdleRaw == null || camoufoxIdleRaw === '' ? '10' : camoufoxIdleRaw, 10);
     const payload = {
+        enabled: document.getElementById('cfg-browser-enabled')?.checked !== false,
         engine,
         proxy_default: document.getElementById('cfg-browser-proxy-default')?.checked === true,
         playwright: {

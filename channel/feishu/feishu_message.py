@@ -10,6 +10,38 @@ from common.utils import expand_path
 from config import conf
 
 
+class FeishuFileTooLargeError(Exception):
+    pass
+
+
+class FeishuDownloadError(Exception):
+    pass
+
+
+def _feishu_error_message(response, fallback: str) -> str:
+    try:
+        data = response.json()
+        code = data.get("code")
+        msg = data.get("msg") or fallback
+        if code == 234037:
+            raise FeishuFileTooLargeError(
+                "该聊天附件超过飞书消息资源下载接口 100MB 限制，无法通过 IM 附件接口直接下载。"
+            )
+        return f"{msg} (code={code})" if code else msg
+    except FeishuFileTooLargeError:
+        raise
+    except Exception:
+        return fallback
+
+
+def _download_response_to_file(response, target_path: str) -> None:
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    with open(target_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+
+
 class FeishuMessage(ChatMessage):
     def __init__(self, event: dict, is_group=False, access_token=None):
         super().__init__(event)
@@ -96,6 +128,15 @@ class FeishuMessage(ChatMessage):
                         text_content = element.get("text", "")
                         if text_content:
                             text_parts.append(text_content)
+                    elif element_tag == "a":
+                        link_text = element.get("text", "")
+                        href = element.get("href") or element.get("url") or ""
+                        if link_text and href:
+                            text_parts.append(f"{link_text} {href}")
+                        elif href:
+                            text_parts.append(href)
+                        elif link_text:
+                            text_parts.append(link_text)
             
             logger.info(f"[FeiShu] Parsed - images: {len(image_keys)}, text_parts: {text_parts}")
             
@@ -160,7 +201,6 @@ class FeishuMessage(ChatMessage):
             )
 
             def _download_file():
-                # 如果响应状态码是200，则将响应内容写入本地文件
                 url = f"https://open.feishu.cn/open-apis/im/v1/messages/{self.msg_id}/resources/{file_key}"
                 headers = {
                     "Authorization": "Bearer " + access_token,
@@ -168,12 +208,13 @@ class FeishuMessage(ChatMessage):
                 params = {
                     "type": "file"
                 }
-                response = requests.get(url=url, headers=headers, params=params)
+                response = requests.get(url=url, headers=headers, params=params, stream=True, timeout=(5, 120))
                 if response.status_code == 200:
-                    with open(self.content, "wb") as f:
-                        f.write(response.content)
+                    _download_response_to_file(response, self.content)
                 else:
+                    error = _feishu_error_message(response, "文件下载失败")
                     logger.info(f"[FeiShu] Failed to download file, key={file_key}, res={response.text}")
+                    raise FeishuDownloadError(error)
             self._prepare_fn = _download_file
         elif msg_type == "audio":
             # 飞书用户发送的语音消息类型为 "audio"，文件为 opus 编码格式。
@@ -200,13 +241,16 @@ class FeishuMessage(ChatMessage):
                     "type": "file"
                 }
                 try:
-                    response = requests.get(url=url, headers=headers, params=params)
-                    logger.info(f"[FeiShu] download audio response: status={response.status_code}, size={len(response.content)} bytes")
+                    response = requests.get(url=url, headers=headers, params=params, stream=True, timeout=(5, 120))
+                    logger.info(
+                        f"[FeiShu] download audio response: status={response.status_code}, "
+                        f"size={response.headers.get('Content-Length', 'unknown')} bytes"
+                    )
                     if response.status_code == 200:
-                        with open(self.content, "wb") as f:
-                            f.write(response.content)
+                        _download_response_to_file(response, self.content)
                         logger.info(f"[FeiShu] audio saved to: {self.content}")
                     else:
+                        _feishu_error_message(response, "语音下载失败")
                         logger.error(f"[FeiShu] Failed to download audio, key={file_key}, status={response.status_code}, res={response.text}")
                 except Exception as e:
                     logger.error(f"[FeiShu] Exception downloading audio, key={file_key}: {e}", exc_info=True)
@@ -241,17 +285,24 @@ class FeishuMessage(ChatMessage):
                             url=url,
                             headers=headers,
                             params={"type": resource_type},
+                            stream=True,
+                            timeout=(5, 120),
                         )
                         last_response = response
                         logger.info(
                             f"[FeiShu] download media response: type={resource_type}, "
-                            f"status={response.status_code}, size={len(response.content)} bytes"
+                            f"status={response.status_code}, size={response.headers.get('Content-Length', 'unknown')} bytes"
                         )
                         if response.status_code == 200:
-                            with open(self.content, "wb") as f:
-                                f.write(response.content)
+                            _download_response_to_file(response, self.content)
                             logger.info(f"[FeiShu] media saved to: {self.content}")
                             return
+                        try:
+                            _feishu_error_message(response, "视频下载失败")
+                        except FeishuFileTooLargeError:
+                            raise
+                        except Exception:
+                            pass
 
                     res_text = last_response.text if last_response is not None else ""
                     status_code = last_response.status_code if last_response is not None else "unknown"
@@ -259,11 +310,32 @@ class FeishuMessage(ChatMessage):
                         f"[FeiShu] Failed to download media, key={file_key}, "
                         f"status={status_code}, res={res_text}"
                     )
+                    raise FeishuDownloadError("视频下载失败")
+                except FeishuFileTooLargeError:
+                    raise
                 except Exception as e:
                     logger.error(f"[FeiShu] Exception downloading media, key={file_key}: {e}", exc_info=True)
+                    raise FeishuDownloadError(str(e))
             self._prepare_fn = _download_media
+        elif msg_type == "interactive":
+            self.ctype = ContextType.TEXT
+            try:
+                content = json.loads(msg.get("content"))
+            except Exception:
+                content = {}
+            text_parts = []
+            self._collect_interactive_text(content, text_parts)
+            self.content = "\n".join(part for part in text_parts if part).strip() or "[卡片消息]"
         else:
-            raise NotImplementedError("Unsupported message type: Type:{} ".format(msg_type))
+            self.ctype = ContextType.TEXT
+            try:
+                content = json.loads(msg.get("content") or "{}")
+            except Exception:
+                content = {}
+            text_parts = []
+            self._collect_interactive_text(content, text_parts)
+            fallback = "\n".join(part for part in text_parts if part).strip()
+            self.content = fallback or f"[{msg_type} 消息]"
 
         self.from_user_id = sender.get("sender_id").get("open_id")
         self.to_user_id = event.get("app_id")
@@ -277,3 +349,30 @@ class FeishuMessage(ChatMessage):
             # 私聊
             self.other_user_id = self.from_user_id
             self.actual_user_id = self.from_user_id
+
+    def _collect_interactive_text(self, node, out: list):
+        if isinstance(node, dict):
+            tag = node.get("tag")
+            if tag == "a":
+                href = node.get("href") or node.get("url") or node.get("link") or ""
+                text = node.get("text") or node.get("content") or ""
+                if text and href:
+                    out.append(f"{text} {href}")
+                elif href:
+                    out.append(str(href))
+                elif text:
+                    out.append(str(text))
+                return
+            url = node.get("url") or node.get("href") or node.get("link")
+            if isinstance(url, str) and url.startswith(("http://", "https://")):
+                out.append(url)
+            for key in ("title", "subtitle", "content", "text", "elements", "body", "header", "columns", "items", "fields", "actions"):
+                if key in node:
+                    self._collect_interactive_text(node.get(key), out)
+        elif isinstance(node, list):
+            for item in node:
+                self._collect_interactive_text(item, out)
+        elif isinstance(node, str):
+            cleaned = node.strip()
+            if cleaned:
+                out.append(cleaned)
