@@ -38,6 +38,8 @@
   "feishu_quote_max_chars": 4000,
   "feishu_quote_fetch_timeout": 5,
   "feishu_quote_download_media": true,
+  "feishu_markdown_card": true,
+  "feishu_progress_card": false,
   "dingtalk_client_id": "",
   "dingtalk_client_secret": "",
   "wecom_bot_id": "",
@@ -52,16 +54,10 @@
   "reasoning_effort": "high",
   "knowledge": true,
   "self_evolution_enabled": true,
+  "mcp_tool_retrieval_enabled": false,
+  "mcp_tool_retrieval_threshold": 20,
+  "mcp_tool_retrieval_top_k": 10,
   "tools": {
-    "browser": {
-      "enabled": true,
-      "engine": "playwright",
-      "backend_proxy": "",
-      "proxy_default": false,
-      "camoufox": {
-        "idle_timeout": 10
-      }
-    },
     "video_parse": {
       "model": "gemini-2.5-flash",
       "models": [

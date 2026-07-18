@@ -17,6 +17,7 @@ from agent.memory.embedding.provider import (
     OpenAIEmbeddingProvider,
     create_embedding_provider,
 )
+from agent.memory.embedding.factory import create_default_embedding_provider
 from agent.memory.embedding.rebuild import (
     RebuildResult,
     clear_index,
@@ -35,6 +36,7 @@ __all__ = [
     "GeminiEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "create_embedding_provider",
+    "create_default_embedding_provider",
     "RebuildResult",
     "clear_index",
     "rebuild_in_process",

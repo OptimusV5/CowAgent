@@ -99,7 +99,7 @@ class ChatGPTBot(Bot, OpenAIImage, OpenAICompatibleBot):
     def _get_http_client(self) -> OpenAIHTTPClient:
         """Override the default HTTP client to reuse our pre-configured one."""
         return self._http_client
-    
+
     def reply(self, query, context=None):
         # acquire reply content
         if context.type == ContextType.TEXT:
@@ -173,32 +173,32 @@ class ChatGPTBot(Bot, OpenAIImage, OpenAICompatibleBot):
         """
         import base64
         import os
-        
+
         try:
             image_path = context.content
             logger.info(f"[CHATGPT] Processing image: {image_path}")
-            
+
             # Check if file exists
             if not os.path.exists(image_path):
                 logger.error(f"[CHATGPT] Image file not found: {image_path}")
                 return Reply(ReplyType.ERROR, _t("图片文件不存在", "Image file not found"))
-            
+
             # Read and encode image
             with open(image_path, "rb") as f:
                 image_data = f.read()
                 image_base64 = base64.b64encode(image_data).decode("utf-8")
-            
+
             # Detect image format
             extension = os.path.splitext(image_path)[1].lower()
             mime_type_map = {
                 ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg", 
+                ".jpeg": "image/jpeg",
                 ".png": "image/png",
                 ".gif": "image/gif",
                 ".webp": "image/webp"
             }
             mime_type = mime_type_map.get(extension, "image/jpeg")
-            
+
             # Get model and API config
             is_custom, _ = parse_custom_bot_type(conf().get("bot_type", ""))
             if is_custom:
@@ -210,7 +210,7 @@ class ChatGPTBot(Bot, OpenAIImage, OpenAICompatibleBot):
                 model = context.get("gpt_model") or conf().get("model", "gpt-4o")
                 api_key = context.get("openai_api_key") or conf().get("open_ai_api_key")
                 api_base = conf().get("open_ai_api_base")
-            
+
             # Build vision request
             messages = [
                 {
@@ -226,9 +226,9 @@ class ChatGPTBot(Bot, OpenAIImage, OpenAICompatibleBot):
                     ]
                 }
             ]
-            
+
             logger.info(f"[CHATGPT] Calling vision API with model: {model}")
-            
+
             # Call OpenAI-compatible API via HTTP
             response = self._http_client.chat_completions(
                 api_key=api_key or None,
@@ -240,16 +240,16 @@ class ChatGPTBot(Bot, OpenAIImage, OpenAICompatibleBot):
 
             content = response["choices"][0]["message"]["content"]
             logger.info(f"[CHATGPT] Vision API response: {content[:100]}...")
-            
+
             # Clean up temp file
             try:
                 os.remove(image_path)
                 logger.debug(f"[CHATGPT] Removed temp image file: {image_path}")
             except Exception:
                 pass
-            
+
             return Reply(ReplyType.TEXT, content)
-            
+
         except Exception as e:
             logger.error(f"[CHATGPT] Image processing error: {e}")
             import traceback
@@ -430,6 +430,13 @@ class AzureChatGPTBot(ChatGPTBot):
                 return False, _t("图片生成失败", "Image generation failed")
         else:
             return False, _t("图片生成失败，未配置text_to_image参数", "Image generation failed: text_to_image is not configured")
+
+    def get_api_config(self):
+        config = super().get_api_config()
+        # The Azure HTTP client already stores the deployment-scoped base URL.
+        # Passing the raw endpoint again would override it in call_with_tools().
+        config["api_base"] = None
+        return config
 
 
 class _AzureChatHTTPClient(OpenAIHTTPClient):

@@ -1,9 +1,9 @@
 """
-Browser tool - Control a browser for web navigation and interaction.
+Browser tool - Control a Chromium browser for web navigation and interaction.
 
-Uses the configured browser backend under the hood. Browser instance is lazily
-started on first use, reused across tool calls within the same session, and
-cleaned up via close().
+Uses Playwright under the hood. Browser instance is lazily started on first
+use, reused across tool calls within the same session, and cleaned up via
+close().
 
 Launch modes (configured under `tools.browser` in config.json):
   - persistent (default): Chromium runs with a persistent user_data_dir
@@ -15,18 +15,22 @@ Launch modes (configured under `tools.browser` in config.json):
   - fresh: Set `persistent` to false to fall back to a clean context every run.
 """
 
+import ipaddress
 import json
 import os
+import socket
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse
 
 from agent.tools.base_tool import BaseTool, ToolResult
-from agent.tools.browser.factory import (
-    create_browser_service,
-    _service_signature,
-    _normalize_browser_config,
-    saved_camoufox_proxy,
-)
+from agent.tools.browser.browser_service import BrowserService
 from common.log import logger
+
+
+# Cloud-metadata endpoints worth blocking even though they are not link-local.
+# (169.254.169.254 — AWS/GCP/Azure IMDS — is already covered by is_link_local;
+# fd00:ec2::254 is the AWS IPv6 IMDS address.)
+_CLOUD_METADATA_IPS = frozenset({ipaddress.ip_address("fd00:ec2::254")})
 
 
 class BrowserTool(BaseTool):
@@ -35,7 +39,6 @@ class BrowserTool(BaseTool):
     name: str = "browser"
     description: str = (
         "Control a browser to navigate web pages, interact with elements, and extract content. "
-        "The active backend is configured by CowAgent and may be Playwright, Camofox REST, or Camoufox. "
         "Actions: navigate, snapshot, click, fill, select, scroll, screenshot, wait, back, forward, "
         "get_text, press, evaluate.\n\n"
         "Workflow: navigate (auto-includes snapshot with element refs) → click/fill/select by ref → snapshot to verify.\n\n"
@@ -43,12 +46,7 @@ class BrowserTool(BaseTool):
         "For login/CAPTCHA/authorization etc., screenshot and ask the user for help. "
         "Login state is persisted across sessions (cookies / localStorage are kept in a "
         "user profile directory), so once the user logs in to a site, the agent can keep "
-        "using it without logging in again.\n\n"
-        "Proxy (Camoufox only): set tools.browser.camoufox.proxy in config to save a browser-page "
-        "proxy. Pass use_proxy=true when visiting sites that are blocked or not directly reachable "
-        "from mainland China (or set proxy_default to true to always use the saved proxy). By default "
-        "the saved proxy is off. Only the pre-configured proxy can be enabled — arbitrary proxy URLs "
-        "are not accepted at runtime."
+        "using it without logging in again."
     )
 
     params: dict = {
@@ -72,8 +70,8 @@ class BrowserTool(BaseTool):
                 "description": "URL to navigate to (for 'navigate' action)"
             },
             "ref": {
-                "anyOf": [{"type": "integer"}, {"type": "string"}],
-                "description": "Element ref from snapshot (number for Playwright/Camoufox, e.g. 1; string for Camofox REST, e.g. e1)"
+                "type": "integer",
+                "description": "Element ref number from snapshot (for click/fill/select)"
             },
             "selector": {
                 "type": "string",
@@ -106,137 +104,137 @@ class BrowserTool(BaseTool):
             "timeout": {
                 "type": "integer",
                 "description": "Timeout in milliseconds (optional, default varies by action)"
-            },
-            "use_proxy": {
-                "type": "boolean",
-                "description": (
-                    "Camoufox only: when true, route browser page traffic through the proxy saved "
-                    "in tools.browser.camoufox.proxy. Set this when the target site is blocked or "
-                    "not directly reachable from mainland China. When false, force a direct "
-                    "connection even if proxy_default is enabled. Omit to follow proxy_default "
-                    "(off by default). Only the pre-configured proxy is used — arbitrary proxy URLs "
-                    "are not accepted."
-                )
             }
         },
         "required": ["action"]
     }
 
-    _shared_service = None
-    _shared_signature: str = ""
+    _shared_service: Optional[BrowserService] = None
 
     def __init__(self, config: dict = None):
         self.config = config or {}
         self.cwd = self.config.get("cwd", os.getcwd())
-        self._service = None
-        self._service_signature = ""
-        # Active proxy mode for the live browser session. None means "not yet
-        # decided" (cold start); it is seeded from proxy_default on the first
-        # call that omits use_proxy, and only changes on an explicit True/False.
-        self._active_use_proxy = None
+        self._service: Optional[BrowserService] = None
 
-    def _effective_config(self) -> dict:
-        """Read the latest runtime config so Web console switches hot-apply."""
-        try:
-            from agent.tools.tool_manager import ToolManager
-            tm = ToolManager()
-            runtime_config = getattr(tm, "tool_configs", {}).get(self.name)
-            if isinstance(runtime_config, dict):
-                self.config = runtime_config
-        except Exception as e:
-            logger.debug(f"[Browser] Failed to read runtime browser config: {e}")
-        return self.config
-
-    def _is_enabled(self) -> bool:
-        config = _normalize_browser_config(self._effective_config())
-        return config.get("enabled", True) is not False
-
-    def _validate_use_proxy(self, use_proxy: Optional[bool]) -> Optional[ToolResult]:
-        if use_proxy is not True:
-            return None
-        browser_cfg = _normalize_browser_config(self._effective_config())
-        engine = str(browser_cfg.get("engine") or "playwright").strip().lower()
-        if engine != "camoufox":
-            return ToolResult.fail(
-                "Error: use_proxy is only supported with tools.browser.engine=camoufox"
-            )
-        if not saved_camoufox_proxy(browser_cfg):
-            return ToolResult.fail(
-                "Error: use_proxy=true but no Camoufox browser proxy is configured "
-                "(set tools.browser.camoufox.proxy)"
-            )
-        return None
-
-    def _resolve_proxy_mode(self, use_proxy: Optional[bool]) -> bool:
-        """Resolve the proxy mode for this call and update the active session mode.
-
-        Tri-state semantics:
-          - explicit True/False: switch the active mode (may rebuild service).
-          - omitted (None): keep the active mode untouched. If no mode has been
-            decided yet (cold start), seed it once from proxy_default.
-
-        proxy_default only seeds the initial value; it is never re-read on
-        subsequent omitted calls, so an active proxied session stays sticky.
-        """
-        if use_proxy is True or use_proxy is False:
-            self._active_use_proxy = use_proxy
-        elif self._active_use_proxy is None:
-            browser_cfg = _normalize_browser_config(self._effective_config())
-            self._active_use_proxy = browser_cfg.get("proxy_default", False) is True
-        return self._active_use_proxy
-
-    def _get_service(self):
+    def _get_service(self) -> BrowserService:
         """Get or create the browser service, sharing across copies."""
-        config = self._effective_config()
-        if self._active_use_proxy is None:
-            # Defensive: a handler called _get_service without going through
-            # execute(); seed the active mode from proxy_default once.
-            self._resolve_proxy_mode(None)
-        signature = _service_signature(config, self._active_use_proxy)
-        if self._service is not None and self._service_signature == signature:
+        if self._service is not None:
             return self._service
 
         # Reuse shared service across tool copies within the same session
-        if BrowserTool._shared_service is not None and BrowserTool._shared_signature == signature:
+        if BrowserTool._shared_service is not None:
             self._service = BrowserTool._shared_service
-            self._service_signature = signature
             return self._service
 
-        if BrowserTool._shared_service is not None and BrowserTool._shared_signature != signature:
-            try:
-                BrowserTool._shared_service.close()
-            except Exception as e:
-                logger.debug(f"[Browser] Failed to close stale service: {e}")
-            BrowserTool._shared_service = None
-            BrowserTool._shared_signature = ""
-
-        self._service = create_browser_service(config, use_proxy=self._active_use_proxy)
-        self._service_signature = signature
+        self._service = BrowserService(self.config)
         BrowserTool._shared_service = self._service
-        BrowserTool._shared_signature = signature
         return self._service
 
-    def execute(self, args: Dict[str, Any]) -> ToolResult:
-        if not self._is_enabled():
-            BrowserTool.reset_shared_service()
-            return ToolResult.fail("Error: browser tool is disabled in tools.browser.enabled")
+    def _allow_private_targets(self) -> bool:
+        """Whether the link-local / cloud-metadata guard is disabled.
 
+        Defaults to False (guard active). Loopback and RFC1918/LAN targets are
+        always reachable so local dev servers work out of the box; this opt-out
+        only lifts the remaining block on link-local / cloud-metadata targets,
+        for an operator who deliberately needs them, by setting
+        ``allow_private_targets: true`` under ``tools.browser`` in config.json.
+        """
+        return bool(self.config.get("allow_private_targets", False))
+
+    @staticmethod
+    def _validate_url_safe(url: str) -> None:
+        """Reject URLs that target link-local / cloud-metadata addresses (SSRF guard).
+
+        Resolves the hostname to its IP address(es) and blocks any that are
+        link-local (169.254.0.0/16 — which includes the 169.254.169.254
+        cloud-metadata endpoint — and IPv6 fe80::/10) or a known IPv6
+        cloud-metadata address. Also rejects URLs with no host, non-HTTP(S)
+        schemes, or hosts that fail DNS resolution.
+
+        Loopback and RFC1918/LAN targets are intentionally left reachable:
+        unlike the vision/web_fetch tools, the browser legitimately opens local
+        pages (a dev server on ``localhost`` / ``127.0.0.1`` / a LAN IP), so a
+        blanket "block all internal" policy would break that core workflow.
+
+        Raises:
+            ValueError: if the URL targets a disallowed address.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL has no hostname")
+
+        try:
+            # Resolve all addresses for the hostname.
+            addr_infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror:
+            raise ValueError(f"Cannot resolve hostname: {hostname}")
+
+        for family, _, _, _, sockaddr in addr_infos:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            # Block only the high-risk targets — link-local (incl. the
+            # 169.254.169.254 cloud-metadata endpoint) and the IPv6 metadata
+            # address. Loopback and RFC1918/LAN stay reachable for local dev.
+            if ip.is_link_local or ip in _CLOUD_METADATA_IPS:
+                raise ValueError(
+                    f"URL resolves to a link-local / cloud-metadata address "
+                    f"({ip_str}), request blocked for security"
+                )
+
+    def _check_engine_ready(self) -> Optional[ToolResult]:
+        """Return an actionable onboarding message if no browser engine is ready.
+
+        Returns None when a system Chrome/Edge or a downloaded Chromium is
+        available (so the tool can proceed). Otherwise returns a ToolResult with
+        clear guidance so the agent asks the user to enable the browser instead
+        of surfacing a raw Playwright launch error. CDP mode is exempt (the
+        endpoint is external and validated at connect time).
+        """
+        if self.config.get("cdp_endpoint"):
+            return None
+        try:
+            from agent.tools.browser.browser_env import capability_summary
+            summary = capability_summary(self.config)
+        except Exception as e:
+            logger.debug(f"[Browser] capability probe failed: {e}")
+            return None
+
+        if summary.get("ready"):
+            return None
+
+        # Desktop clients (dev or packaged) have no `cow` CLI — onboard via the
+        # in-chat `/install-browser` command. Source / web / server installs use
+        # the `cow install-browser` terminal command.
+        install_hint = (
+            "reply `/install-browser`" if summary.get("is_desktop")
+            else "run `cow install-browser` in a terminal"
+        )
+        return ToolResult.fail(
+            f"Browser tool not ready. Ask the user to {install_hint} (installs a browser engine; "
+            "skipped automatically if Google Chrome is already installed). "
+            "Do not retry until the user confirms."
+        )
+
+    def execute(self, args: Dict[str, Any]) -> ToolResult:
         action = args.get("action", "").strip().lower()
         if not action:
             return ToolResult.fail("Error: 'action' parameter is required")
-
-        use_proxy = args.get("use_proxy") if "use_proxy" in args else None
-        if use_proxy is not None and not isinstance(use_proxy, bool):
-            return ToolResult.fail("Error: 'use_proxy' must be a boolean")
-        proxy_err = self._validate_use_proxy(use_proxy)
-        if proxy_err:
-            return proxy_err
-        self._resolve_proxy_mode(use_proxy)
 
         handler = self._ACTION_MAP.get(action)
         if not handler:
             valid = ", ".join(sorted(self._ACTION_MAP.keys()))
             return ToolResult.fail(f"Unknown action '{action}'. Valid actions: {valid}")
+
+        # Preflight: on desktop the playwright package is bundled but the browser
+        # binary may be missing; return actionable onboarding instead of a cryptic
+        # launch failure.
+        not_ready = self._check_engine_ready()
+        if not_ready is not None:
+            return not_ready
 
         try:
             return handler(self, args)
@@ -255,6 +253,16 @@ class BrowserTool(BaseTool):
         # Only auto-prepend https:// for bare hosts; preserve file://, about:, data:, etc.
         if "://" not in url and not url.startswith(("about:", "data:")):
             url = "https://" + url
+        # SSRF guard: for http(s) targets, reject hosts that resolve to
+        # link-local / cloud-metadata addresses before the browser navigates
+        # (and then auto-snapshots the page back to the model). Loopback and
+        # RFC1918/LAN are allowed so local dev servers work. Non-HTTP schemes
+        # (about:/data:/file:/chrome:) are not network-egress targets here.
+        if url.split(":", 1)[0].lower() in ("http", "https") and not self._allow_private_targets():
+            try:
+                self._validate_url_safe(url)
+            except ValueError as e:
+                return ToolResult.fail(f"Error: {e}")
         timeout = args.get("timeout", 30000)
         service = self._get_service()
         result = service.navigate(url, timeout=timeout)
@@ -399,8 +407,6 @@ class BrowserTool(BaseTool):
         new_tool.context = getattr(self, "context", None)
         new_tool.cwd = self.cwd
         new_tool._service = self._service
-        new_tool._service_signature = self._service_signature
-        new_tool._active_use_proxy = self._active_use_proxy
         return new_tool
 
     def close(self):
@@ -408,18 +414,5 @@ class BrowserTool(BaseTool):
         if self._service:
             self._service.close()
             self._service = None
-            self._service_signature = ""
         BrowserTool._shared_service = None
-        BrowserTool._shared_signature = ""
         logger.info("[Browser] BrowserTool closed")
-
-    @classmethod
-    def reset_shared_service(cls):
-        """Close the shared browser backend so config changes take effect."""
-        if cls._shared_service:
-            try:
-                cls._shared_service.close()
-            except Exception as e:
-                logger.debug(f"[Browser] Failed to reset shared service: {e}")
-        cls._shared_service = None
-        cls._shared_signature = ""

@@ -810,8 +810,8 @@ class CowCliPlugin(Plugin):
                 "you can also run `cow install-browser` in a terminal.",
             )
         return _t(
-            "✅ 安装流程已结束。请重启 CowAgent 后使用 browser 工具（进度见上方消息）。",
-            "✅ Installation finished. Restart CowAgent to use the browser tool (see messages above for progress).",
+            "✅ 安装流程已结束。请重启 CowAgent 后使用 browser 工具。",
+            "✅ Installation finished. Restart CowAgent to use the browser tool.",
         )
 
     # ------------------------------------------------------------------
@@ -1342,8 +1342,17 @@ class CowCliPlugin(Plugin):
             }
         else:
             provider_type = ""
-            meta = EMBEDDING_VENDORS.get(provider_key) or {}
+            resolved_key = "custom" if provider_key.startswith("custom:") else provider_key
+            meta = EMBEDDING_VENDORS.get(resolved_key) or {}
         model = cfg_model or meta.get("default_model")
+        # Custom provider model fallback: read from custom_providers entry.
+        if not model and provider_key.startswith("custom:"):
+            from models.custom_provider import parse_custom_bot_type, get_custom_providers, _find_provider_by_id
+            _, custom_id = parse_custom_bot_type(provider_key)
+            if custom_id:
+                entry = _find_provider_by_id(get_custom_providers(), custom_id)
+                if entry and entry.get("model"):
+                    model = entry["model"]
         dim = cfg_dim if cfg_dim > 0 else meta.get("default_dimensions")
         label = f"{provider_key} ({provider_type})" if provider_type else provider_key
         return label, model, dim

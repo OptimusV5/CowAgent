@@ -15,9 +15,15 @@ from .diff import (
     normalize_to_lf,
     restore_line_endings,
     normalize_for_fuzzy_match,
+    count_matches,
     fuzzy_find_text,
     generate_diff_string,
     FuzzyMatchResult
+)
+
+from .url_safety import (
+    validate_url_safe,
+    assert_public_ip
 )
 
 __all__ = [
@@ -34,7 +40,10 @@ __all__ = [
     'normalize_to_lf',
     'restore_line_endings',
     'normalize_for_fuzzy_match',
+    'count_matches',
     'fuzzy_find_text',
     'generate_diff_string',
-    'FuzzyMatchResult'
+    'FuzzyMatchResult',
+    'validate_url_safe',
+    'assert_public_ip'
 ]

@@ -30,13 +30,14 @@ CLAUDE_35_SONNET = "claude-3-5-sonnet-latest"  # "latest" tag always points to t
 CLAUDE_35_SONNET_1022 = "claude-3-5-sonnet-20241022"  # dated name pinned to a specific release
 CLAUDE_35_SONNET_0620 = "claude-3-5-sonnet-20240620"
 CLAUDE_4_OPUS = "claude-opus-4-0"
-CLAUDE_FABLE_5 = "claude-fable-5"        # Claude Fable 5 (often restricted by policy)
+CLAUDE_FABLE_5 = "claude-fable-5"        # Claude Fable 5 - alternative Claude 5 flagship
 CLAUDE_4_8_OPUS = "claude-opus-4-8"      # Claude Opus 4.8 - Agent recommended model
 CLAUDE_4_7_OPUS = "claude-opus-4-7"      # Claude Opus 4.7
 CLAUDE_4_6_OPUS = "claude-opus-4-6"      # Claude Opus 4.6
 CLAUDE_4_SONNET = "claude-sonnet-4-0"    # Claude Sonnet 4.0
 CLAUDE_4_5_SONNET = "claude-sonnet-4-5"  # Claude Sonnet 4.5 - Agent recommended model
 CLAUDE_4_6_SONNET = "claude-sonnet-4-6"  # Claude Sonnet 4.6 - Agent recommended model
+CLAUDE_SONNET_5 = "claude-sonnet-5"      # Claude Sonnet 5 - default flagship model for Claude
 
 # Gemini (Google)
 GEMINI_PRO = "gemini-1.0-pro"
@@ -79,6 +80,9 @@ GPT_54 = "gpt-5.4"  # GPT-5.4 - Agent recommended model
 GPT_54_MINI = "gpt-5.4-mini"
 GPT_54_NANO = "gpt-5.4-nano"
 GPT_55 = "gpt-5.5"  # GPT-5.5 - top-tier (expensive), not default
+GPT_56_LUNA = "gpt-5.6-luna"    # GPT-5.6 Luna - default flagship model for GPT
+GPT_56_TERRA = "gpt-5.6-terra"  # GPT-5.6 Terra
+GPT_56_SOL = "gpt-5.6-sol"      # GPT-5.6 Sol - highest intelligence, higher latency
 O1 = "o1-preview"
 O1_MINI = "o1-mini"
 WHISPER_1 = "whisper-1"
@@ -121,7 +125,8 @@ MINIMAX_TEXT_01 = "MiniMax-Text-01"  # MiniMax multimodal (vision)
 MINIMAX_ABAB6_5 = "abab6.5-chat"  # MiniMax abab6.5
 
 # GLM (Zhipu AI)
-GLM_5_1 = "glm-5.1"  # GLM-5.1 - Agent recommended model (default)
+GLM_5_2 = "glm-5.2"  # GLM-5.2 - Agent recommended model (default)
+GLM_5_1 = "glm-5.1"  # GLM-5.1
 GLM_5_TURBO = "glm-5-turbo"  # GLM-5-Turbo
 GLM_5 = "glm-5"  # GLM-5
 GLM_5V_TURBO = "glm-5v-turbo"  # Zhipu multimodal (vision)
@@ -137,9 +142,12 @@ GLM_4_7 = "glm-4.7"  # GLM-4.7 - Agent recommended model
 
 # Kimi (Moonshot)
 MOONSHOT = "moonshot"
+KIMI_K3 = "kimi-k3"  # Kimi K3 - Agent recommended model (default)
+KIMI_K2_7_CODE = "kimi-k2.7-code"  # Kimi K2.7 Code
+KIMI_K2_7_CODE_HIGHSPEED = "kimi-k2.7-code-highspeed"  # Kimi K2.7 Code highspeed
 KIMI_K2 = "kimi-k2"
 KIMI_K2_5 = "kimi-k2.5"
-KIMI_K2_6 = "kimi-k2.6"  # Kimi K2.6 - Agent recommended model (default)
+KIMI_K2_6 = "kimi-k2.6"
 
 # Xiaomi MiMo
 MIMO_V2_5_PRO = "mimo-v2.5-pro"      # MiMo V2.5 Pro - flagship, long context (default recommendation)
@@ -150,6 +158,8 @@ MIMO_V2_FLASH = "mimo-v2-flash"      # MiMo V2 Flash - high-speed
 
 # Doubao (Volcengine Ark)
 DOUBAO = "doubao"
+DOUBAO_SEED_2_1_PRO = "doubao-seed-2-1-pro-260628"
+DOUBAO_SEED_2_1_TURBO = "doubao-seed-2-1-turbo-260628"
 DOUBAO_SEED_2_CODE = "doubao-seed-2-0-code-preview-260215"
 DOUBAO_SEED_2_PRO = "doubao-seed-2-0-pro-260215"
 DOUBAO_SEED_2_LITE = "doubao-seed-2-0-lite-260215"
@@ -194,7 +204,7 @@ MODEL_LIST = [
               MIMO, MIMO_V2_5_PRO, MIMO_V2_5, MIMO_V2_PRO, MIMO_V2_OMNI, MIMO_V2_FLASH,
 
               # Claude
-              CLAUDE3, CLAUDE_4_8_OPUS, CLAUDE_4_7_OPUS, CLAUDE_FABLE_5, CLAUDE_4_6_SONNET, CLAUDE_4_6_OPUS, CLAUDE_4_OPUS, CLAUDE_4_5_SONNET, CLAUDE_4_SONNET, CLAUDE_3_OPUS, CLAUDE_3_OPUS_0229,
+              CLAUDE_SONNET_5, CLAUDE_FABLE_5, CLAUDE3, CLAUDE_4_8_OPUS, CLAUDE_4_7_OPUS, CLAUDE_4_6_SONNET, CLAUDE_4_6_OPUS, CLAUDE_4_OPUS, CLAUDE_4_5_SONNET, CLAUDE_4_SONNET, CLAUDE_3_OPUS, CLAUDE_3_OPUS_0229,
               CLAUDE_35_SONNET, CLAUDE_35_SONNET_1022, CLAUDE_35_SONNET_0620, CLAUDE_3_SONNET, CLAUDE_3_HAIKU,
               "claude", "claude-3-haiku", "claude-3-sonnet", "claude-3-opus", "claude-3.5-sonnet",
 
@@ -208,23 +218,25 @@ MODEL_LIST = [
               GPT4_TURBO, GPT4_TURBO_PREVIEW, GPT4_TURBO_01_25, GPT4_TURBO_11_06, GPT4_TURBO_04_09,
               GPT_4o, GPT_4O_0806, GPT_4o_MINI,
               GPT_41, GPT_41_MINI, GPT_41_NANO,
+              GPT_56_LUNA, GPT_56_TERRA, GPT_56_SOL,
               GPT_5, GPT_5_MINI, GPT_5_NANO,
               GPT_54, GPT_55, GPT_54_MINI, GPT_54_NANO,
               O1, O1_MINI,
 
               # GLM (Zhipu AI)
-              ZHIPU_AI, GLM_5_1, GLM_5_TURBO, GLM_5, GLM_4, GLM_4_PLUS, GLM_4_flash, GLM_4_LONG, GLM_4_ALLTOOLS,
+              ZHIPU_AI, GLM_5_2, GLM_5_1, GLM_5_TURBO, GLM_5, GLM_4, GLM_4_PLUS, GLM_4_flash, GLM_4_LONG, GLM_4_ALLTOOLS,
               GLM_4_0520, GLM_4_AIR, GLM_4_AIRX, GLM_4_7,
 
               # Qwen
               QWEN37_PLUS, QWEN37_MAX, QWEN36_PLUS, QWEN35_PLUS, QWEN3_MAX, QWEN_MAX, QWEN_PLUS, QWEN_TURBO, QWEN_LONG,
 
               # Doubao
-              DOUBAO, DOUBAO_SEED_2_CODE, DOUBAO_SEED_2_PRO, DOUBAO_SEED_2_LITE, DOUBAO_SEED_2_MINI,
+              DOUBAO, DOUBAO_SEED_2_1_PRO, DOUBAO_SEED_2_1_TURBO,
+              DOUBAO_SEED_2_CODE, DOUBAO_SEED_2_PRO, DOUBAO_SEED_2_LITE, DOUBAO_SEED_2_MINI,
 
               # Kimi (Moonshot)
               MOONSHOT, "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k",
-              KIMI_K2_6, KIMI_K2_5, KIMI_K2,
+              KIMI_K3, KIMI_K2_7_CODE, KIMI_K2_7_CODE_HIGHSPEED, KIMI_K2_6, KIMI_K2_5, KIMI_K2,
 
               # ModelScope
               MODELSCOPE,

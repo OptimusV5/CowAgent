@@ -18,12 +18,6 @@ description: 控制浏览器访问和操作网页
     - 在 Linux 上安装系统依赖
     - 下载 Chromium 浏览器（Linux 服务器自动使用无头精简版）
     - 自动检测国内网络并使用镜像加速
-
-    如只想让浏览器内核下载走代理：
-    ```bash
-    cow install-browser --proxy socks5h://127.0.0.1:1080
-    ```
-    该代理不影响 pip 或 npm。
   </Tab>
   <Tab title="手动安装">
     ```bash
@@ -111,6 +105,15 @@ Agent 使用浏览器的典型流程：
 }
 ```
 
+## 浏览器内核
+
+浏览器内核会自动选择，无需配置：
+
+1. 若检测到本机已安装 **Google Chrome / Edge**，直接驱动系统浏览器，**无需下载 Chromium**，并使用真实浏览器指纹；
+2. 否则使用 `install-browser` 下载到 `~/.cow` 的 Chromium 内核作为兜底。
+
+两种方式都使用下面的登录态持久化，行为一致。
+
 ## 登录态持久化
 
 **只需登录一次目标网站，Agent 后续可直接使用**。提供两种方式：
@@ -176,39 +179,3 @@ Agent 使用浏览器的典型流程：
 <Note>
   Chrome 137+ 限制 `--remote-debugging-port` 必须搭配独立 `--user-data-dir`，因此 CDP 启动的 Chrome **无法直接复用你日常 Chrome 的登录态**，需要在独立目录中重新登录一次。
 </Note>
-
-### 方式三：Camoufox 后端
-
-如需替换 Playwright Chromium 后端，可使用 daijro/camoufox 的 Python Playwright 兼容后端。安装：
-
-```bash
-cow install-browser --engine camoufox
-```
-
-配置示例：
-
-```json
-{
-  "tools": {
-    "browser": {
-      "engine": "camoufox",
-      "proxy_default": false,
-      "camoufox": {
-        "persistent": true,
-        "user_data_dir": "~/.cow/camoufox_profile",
-        "proxy": "socks5h://127.0.0.1:1080",
-        "idle_timeout": 10,
-        "humanize": true,
-        "geoip": false,
-        "os": ""
-      }
-    }
-  }
-}
-```
-
-`proxy_default` 控制是否在启动浏览器时自动使用已保存的 `camoufox.proxy`。为 `false`（默认）时，页面流量直连，除非 agent 在 `browser` 工具调用中传 `use_proxy: true`（例如访问中国大陆无法直接访问的网站时）。运行时只能启用配置里已保存的代理，不能传入任意代理 URL。
-
-`backend_proxy`（位于 `tools.browser` 顶层）是另一项配置：仅代理 CowAgent 访问 Camofox REST API 的 HTTP 请求，不影响 Camoufox 页面流量。
-
-`camofox` 表示已有的 Camofox REST 后端，`camoufox` 表示 Python 包后端。两者配置不同，不会互相覆盖。

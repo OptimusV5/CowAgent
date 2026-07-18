@@ -24,7 +24,7 @@ from collections import OrderedDict
 from common import const
 from common import i18n
 from common.log import logger
-from common.proxy import mask_proxy_url, normalize_proxy_url, proxy_dict
+from common.proxy import mask_proxy_url, normalize_proxy_url
 from common.singleton import singleton
 from common.video_parse_utils import (
     normalize_yt_dlp_proxy_sites,
@@ -35,6 +35,14 @@ from config import conf
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
+
+
+def _project_config_path() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config.json",
+    )
+
 
 def _get_web_password() -> str:
     # Coerce to str so non-string values in config.json (e.g. numeric password) won't break comparisons
@@ -188,6 +196,29 @@ def _read_uploaded_file_bytes(file_obj) -> bytes:
     raise TypeError(f"Unsupported uploaded content type: {type(content).__name__}")
 
 
+def _read_uploaded_file_bytes_limited(file_obj, max_bytes: int) -> bytes:
+    """Read uploaded content and fail once it exceeds max_bytes."""
+    if isinstance(file_obj, bytes):
+        content = file_obj
+    elif isinstance(file_obj, str):
+        content = file_obj.encode("utf-8")
+    elif hasattr(file_obj, "file") and hasattr(file_obj.file, "read"):
+        content = file_obj.file.read(max_bytes + 1)
+    elif hasattr(file_obj, "read"):
+        content = file_obj.read(max_bytes + 1)
+    elif hasattr(file_obj, "value"):
+        content = file_obj.value
+    else:
+        raise ValueError("Unable to read uploaded file content")
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if not isinstance(content, bytes):
+        raise TypeError(f"Unsupported uploaded content type: {type(content).__name__}")
+    if len(content) > max_bytes:
+        raise ValueError("file too large")
+    return content
+
+
 def _raw_web_input():
     """Return unprocessed multipart form data when web.py exposes rawinput."""
     rawinput = getattr(getattr(web, "webapi", None), "rawinput", None)
@@ -247,7 +278,13 @@ class WebChannel(ChatChannel):
         self.session_queues = {}  # session_id -> Queue (fallback polling)
         self.request_to_session = {}  # request_id -> session_id
         self.sse_queues = {}  # request_id -> Queue (SSE streaming)
+        # request_id -> last-active timestamp. Refreshed while the SSE
+        # generator is being consumed (client still connected). The janitor
+        # only reclaims queues whose generator stopped refreshing this, so a
+        # long-running but still-streaming reply is never wrongly killed.
+        self.sse_last_active = {}
         self._http_server = None
+        self._sse_janitor_started = False
 
     def _generate_msg_id(self):
         """生成唯一的消息ID"""
@@ -534,14 +571,25 @@ class WebChannel(ChatChannel):
                 file_path = data.get("path", "")
                 file_name = data.get("file_name", os.path.basename(file_path))
                 file_type = data.get("file_type", "file")
-                from urllib.parse import quote
-                web_url = f"/api/file?path={quote(file_path)}"
+                # Remote URLs are passed through as-is; local files are served
+                # via the backend /api/file endpoint.
+                remote_url = data.get("url", "")
+                is_remote = bool(remote_url) and remote_url.lower().startswith(("http://", "https://"))
+                if is_remote:
+                    web_url = remote_url
+                else:
+                    from urllib.parse import quote
+                    web_url = f"/api/file?path={quote(file_path)}"
                 is_image = file_type == "image"
-                q.put({
+                payload = {
                     "type": "image" if is_image else "file",
                     "content": web_url,
                     "file_name": file_name,
-                })
+                    # Preserve the concrete media kind (image/video/audio/...)
+                    # so richer clients can render an inline player.
+                    "file_type": file_type,
+                }
+                q.put(payload)
 
         return on_event
 
@@ -872,6 +920,7 @@ class WebChannel(ChatChannel):
 
             if use_sse:
                 self.sse_queues[request_id] = Queue()
+                self.sse_last_active[request_id] = time.time()
 
             trigger_prefixs = conf().get("single_chat_prefix", [""])
             if check_prefix(prompt, trigger_prefixs) is None:
@@ -886,8 +935,7 @@ class WebChannel(ChatChannel):
 
             if context is None:
                 logger.warning(f"[WebChannel] Context is None for session {session_id}, message may be filtered")
-                if request_id in self.sse_queues:
-                    del self.sse_queues[request_id]
+                self._drop_sse_request(request_id)
                 return json.dumps({"status": "error", "message": "Message was filtered"})
 
             context["session_id"] = session_id
@@ -909,6 +957,60 @@ class WebChannel(ChatChannel):
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             return json.dumps({"status": "error", "message": str(e)})
+
+    def _drop_sse_request(self, request_id: str):
+        """Reclaim all state tied to an SSE request to prevent fd/memory leaks.
+
+        Removing the queue lets the WSGI generator and its socket be released,
+        and dropping request_to_session avoids unbounded map growth.
+        """
+        self.sse_queues.pop(request_id, None)
+        self.sse_last_active.pop(request_id, None)
+        self.request_to_session.pop(request_id, None)
+
+    def _start_sse_janitor(self):
+        """Start a background thread that reclaims orphaned SSE queues.
+
+        When a client disconnects before the "done" event arrives (browser
+        closed, session switched, network drop), the generator may keep the
+        queue around to allow reconnection. Without a sweep these orphans
+        accumulate, leaking file descriptors until cheroot raises
+        "[Errno 24] Too many open files".
+
+        Reclamation is based on idle time, not total age: an active stream
+        refreshes ``sse_last_active`` every second while its generator is being
+        consumed, so a long-running reply (even hours long) is never killed
+        while the client stays connected. Only queues that stopped refreshing
+        (client gone) past SSE_IDLE_TIMEOUT are reclaimed.
+        """
+        if self._sse_janitor_started:
+            return
+        self._sse_janitor_started = True
+
+        SSE_IDLE_TIMEOUT = 1800  # 30 minutes with no client consumption
+        SWEEP_INTERVAL = 60
+
+        def _sweep():
+            while True:
+                time.sleep(SWEEP_INTERVAL)
+                try:
+                    now = time.time()
+                    stale = [
+                        rid for rid, ts in list(self.sse_last_active.items())
+                        if now - ts > SSE_IDLE_TIMEOUT
+                    ]
+                    for rid in stale:
+                        self._drop_sse_request(rid)
+                    if stale:
+                        logger.info(
+                            f"[WebChannel] SSE janitor reclaimed {len(stale)} "
+                            f"idle stream(s)"
+                        )
+                except Exception as e:
+                    logger.warning(f"[WebChannel] SSE janitor error: {e}")
+
+        t = threading.Thread(target=_sweep, name="sse-janitor", daemon=True)
+        t.start()
 
     def stream_response(self, request_id: str):
         """
@@ -934,6 +1036,10 @@ class WebChannel(ChatChannel):
 
         try:
             while time.time() < deadline:
+                # Mark the stream alive on every loop. While the client keeps
+                # consuming, the generator runs and refreshes this, so the
+                # janitor won't reclaim a long-running but active stream.
+                self.sse_last_active[request_id] = time.time()
                 try:
                     item = q.get(timeout=1)
                 except Empty:
@@ -962,13 +1068,21 @@ class WebChannel(ChatChannel):
                     # voice_attach payload through to the browser.
                     post_done = True
                     post_deadline = time.time() + 2  # 2s post-attach tail
+        except GeneratorExit:
+            # Client disconnected (WSGI closed the generator). If the reply is
+            # already complete there is nothing to resume, so reclaim now to
+            # release the socket fd. Otherwise keep the queue briefly so a
+            # reconnect with the same request_id can resume; the janitor will
+            # reclaim it if no reconnect happens.
+            if post_done:
+                self._drop_sse_request(request_id)
+            raise
         finally:
-            # Only drop the queue once the reply is actually complete. If the
-            # client disconnected early (e.g. switched sessions and will
-            # re-attach with the same request_id), keep the queue so the new
-            # connection can resume reading the remaining events.
+            # Drop the queue once the reply is actually complete or the idle
+            # deadline has passed. Early client disconnects are handled by the
+            # GeneratorExit branch above and the background janitor.
             if post_done or time.time() >= deadline:
-                self.sse_queues.pop(request_id, None)
+                self._drop_sse_request(request_id)
 
     def cancel_request(self):
         """
@@ -1128,7 +1242,7 @@ class WebChannel(ChatChannel):
         except Exception as e:
             logger.debug(f"[WebChannel] Could not open browser: {e}")
 
-        # 确保静态文件目录存在
+        # Ensure the static directory exists.
         static_dir = os.path.join(os.path.dirname(__file__), 'static')
         if not os.path.exists(static_dir):
             os.makedirs(static_dir)
@@ -1151,7 +1265,6 @@ class WebChannel(ChatChannel):
             '/chat', 'ChatHandler',
             '/config', 'ConfigHandler',
             '/api/models', 'ModelsHandler',
-            '/api/browser', 'BrowserConfigHandler',
             '/api/video-parse', 'VideoParseConfigHandler',
             '/api/weibo-parse', 'WeiboParseConfigHandler',
             '/api/channels', 'ChannelsHandler',
@@ -1164,7 +1277,12 @@ class WebChannel(ChatChannel):
             '/api/knowledge/list', 'KnowledgeListHandler',
             '/api/knowledge/read', 'KnowledgeReadHandler',
             '/api/knowledge/graph', 'KnowledgeGraphHandler',
+            '/api/knowledge/action', 'KnowledgeActionHandler',
+            '/api/knowledge/import', 'KnowledgeImportHandler',
             '/api/scheduler', 'SchedulerHandler',
+            '/api/scheduler/toggle', 'SchedulerToggleHandler',
+            '/api/scheduler/update', 'SchedulerUpdateHandler',
+            '/api/scheduler/delete', 'SchedulerDeleteHandler',
             '/api/sessions', 'SessionsHandler',
             '/api/sessions/(.*)/generate_title', 'SessionTitleHandler',
             '/api/sessions/(.*)/clear_context', 'SessionClearContextHandler',
@@ -1173,6 +1291,7 @@ class WebChannel(ChatChannel):
             '/api/messages/delete', 'MessageDeleteHandler',
             '/api/logs', 'LogsHandler',
             '/api/version', 'VersionHandler',
+            '/mcp/oauth/callback', 'McpOAuthCallbackHandler',
             '/assets/(.*)', 'AssetsHandler',
         )
         app = web.application(urls, globals(), autoreload=False)
@@ -1197,6 +1316,8 @@ class WebChannel(ChatChannel):
         server.requests.min = 20
         server.requests.max = 80
         self._http_server = server
+        # Reclaim orphaned SSE queues so disconnected clients don't leak fds.
+        self._start_sse_janitor()
         try:
             server.start()
         except (KeyboardInterrupt, SystemExit):
@@ -1222,6 +1343,64 @@ class WebChannel(ChatChannel):
 class RootHandler:
     def GET(self):
         raise web.seeother('/chat')
+
+
+class McpOAuthCallbackHandler:
+    """OAuth redirect target for MCP servers requiring authorization.
+
+    The browser lands here after the user authorizes a remote MCP server.
+    We exchange the authorization code for tokens and bring the server
+    online. Unauthenticated by design: the OAuth `state` param is the
+    single-use secret that binds this request to a pending authorization.
+    """
+
+    def GET(self):
+        web.header('Content-Type', 'text/html; charset=utf-8')
+        params = web.input(code="", state="", error="", error_description="")
+
+        def _page(title: str, message: str) -> str:
+            return (
+                "<!doctype html><html><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                f"<title>{title}</title></head>"
+                "<body style='font-family:-apple-system,Segoe UI,Roboto,sans-serif;"
+                "max-width:520px;margin:64px auto;padding:0 20px;text-align:center;color:#1f2328'>"
+                f"<h2>{title}</h2><p style='color:#57606a'>{message}</p></body></html>"
+            )
+
+        if params.error:
+            logger.warning(f"[MCP-OAuth] callback error: {params.error} {params.error_description}")
+            return _page("授权失败", f"{params.error}: {params.error_description or ''}")
+
+        if not params.code or not params.state:
+            return _page("参数缺失", "回调缺少 code 或 state 参数。")
+
+        try:
+            from agent.tools.mcp.mcp_oauth import pop_pending
+            from agent.tools.mcp.mcp_client import notify_server_authorized
+        except Exception as e:
+            logger.warning(f"[MCP-OAuth] callback import failed: {e}")
+            return _page("内部错误", "OAuth 模块不可用。")
+
+        handler = pop_pending(params.state)
+        if handler is None:
+            return _page("会话已过期", "授权请求不存在或已过期，请重新触发授权。")
+
+        try:
+            ok = handler.finish_authorization(params.code)
+        except Exception as e:
+            logger.warning(f"[MCP-OAuth] token exchange crashed: {e}")
+            ok = False
+
+        if not ok:
+            return _page("授权失败", "换取令牌失败，请重试。")
+
+        notify_server_authorized(handler.server_name)
+        logger.info(f"[MCP-OAuth] Server '{handler.server_name}' authorized via web callback")
+        return _page(
+            "授权成功",
+            f"MCP 服务 “{handler.server_name}” 已授权，可以返回聊天继续使用了。",
+        )
 
 
 class AuthCheckHandler:
@@ -1480,15 +1659,14 @@ class ConfigHandler:
     _RECOMMENDED_MODELS = [
         const.DEEPSEEK_V4_FLASH, const.DEEPSEEK_V4_PRO,
         const.MINIMAX_M3, const.MINIMAX_M2_7_HIGHSPEED, const.MINIMAX_M2_7,
-        # claude-fable-5 is placed after claude-opus-4-7 (not as the Claude
-        # default) since it is often unavailable due to policy restrictions.
-        const.CLAUDE_4_8_OPUS, const.CLAUDE_4_7_OPUS, const.CLAUDE_FABLE_5, const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS,
+        # claude-sonnet-5 is the Claude default; claude-fable-5 follows right after it.
+        const.CLAUDE_SONNET_5, const.CLAUDE_FABLE_5, const.CLAUDE_4_8_OPUS, const.CLAUDE_4_7_OPUS, const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS,
         const.GEMINI_35_FLASH, const.GEMINI_31_FLASH_LITE_PRE, const.GEMINI_31_PRO_PRE, const.GEMINI_3_FLASH_PRE,
-        const.GPT_55, const.GPT_54, const.GPT_54_MINI, const.GPT_54_NANO, const.GPT_5, const.GPT_41, const.GPT_4o,
-        const.GLM_5_1, const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7,
+        const.GPT_56_LUNA, const.GPT_56_TERRA, const.GPT_56_SOL, const.GPT_55, const.GPT_54, const.GPT_54_MINI, const.GPT_54_NANO, const.GPT_5, const.GPT_41, const.GPT_4o,
+        const.GLM_5_2, const.GLM_5_1, const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7,
         const.QWEN37_PLUS, const.QWEN37_MAX, const.QWEN36_PLUS,
-        const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE,
-        const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2,
+        const.DOUBAO_SEED_2_1_PRO, const.DOUBAO_SEED_2_1_TURBO, const.DOUBAO_SEED_2_CODE,
+        const.KIMI_K3, const.KIMI_K2_7_CODE, const.KIMI_K2_7_CODE_HIGHSPEED, const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2,
         const.ERNIE_5_1, const.ERNIE_5, const.ERNIE_X1_1, const.ERNIE_45_TURBO_128K, const.ERNIE_45_TURBO_32K,
         const.MIMO_V2_5_PRO, const.MIMO_V2_5,
     ]
@@ -1527,7 +1705,7 @@ class ConfigHandler:
             "api_base_key": "claude_api_base",
             "api_base_default": "https://api.anthropic.com/v1",
             "api_base_placeholder": _PLACEHOLDER_V1,
-            "models": [const.CLAUDE_4_8_OPUS, const.CLAUDE_4_7_OPUS, const.CLAUDE_FABLE_5, const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS],
+            "models": [const.CLAUDE_SONNET_5, const.CLAUDE_FABLE_5, const.CLAUDE_4_8_OPUS, const.CLAUDE_4_7_OPUS, const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS],
         }),
         ("gemini", {
             "label": "Gemini",
@@ -1543,7 +1721,7 @@ class ConfigHandler:
             "api_base_key": "open_ai_api_base",
             "api_base_default": "https://api.openai.com/v1",
             "api_base_placeholder": _PLACEHOLDER_V1,
-            "models": [const.GPT_55, const.GPT_54, const.GPT_54_MINI, const.GPT_54_NANO, const.GPT_5, const.GPT_41, const.GPT_4o],
+            "models": [const.GPT_56_LUNA, const.GPT_56_TERRA, const.GPT_56_SOL, const.GPT_55, const.GPT_54, const.GPT_54_MINI, const.GPT_54_NANO, const.GPT_5, const.GPT_41, const.GPT_4o],
         }),
         ("zhipu", {
             "label": {"zh": "智谱AI", "en": "GLM"},
@@ -1551,7 +1729,7 @@ class ConfigHandler:
             "api_base_key": "zhipu_ai_api_base",
             "api_base_default": "https://open.bigmodel.cn/api/paas/v4",
             "api_base_placeholder": _PLACEHOLDER_ZHIPU,
-            "models": [const.GLM_5_1, const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7],
+            "models": [const.GLM_5_2, const.GLM_5_1, const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7],
         }),
         ("dashscope", {
             "label": {"zh": "通义千问", "en": "Qwen"},
@@ -1567,7 +1745,7 @@ class ConfigHandler:
             "api_base_key": "ark_base_url",
             "api_base_default": "https://ark.cn-beijing.volces.com/api/v3",
             "api_base_placeholder": _PLACEHOLDER_DOUBAO,
-            "models": [const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE],
+            "models": [const.DOUBAO_SEED_2_1_PRO, const.DOUBAO_SEED_2_1_TURBO, const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE],
         }),
         ("moonshot", {
             "label": "Kimi",
@@ -1575,7 +1753,7 @@ class ConfigHandler:
             "api_base_key": "moonshot_base_url",
             "api_base_default": "https://api.moonshot.cn/v1",
             "api_base_placeholder": _PLACEHOLDER_V1,
-            "models": [const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2],
+            "models": [const.KIMI_K3, const.KIMI_K2_7_CODE, const.KIMI_K2_7_CODE_HIGHSPEED, const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2],
         }),
         ("qianfan", {
             "label": {"zh": "百度千帆", "en": "ERNIE"},
@@ -1744,11 +1922,14 @@ class ConfigHandler:
             if not applied:
                 return json.dumps({"status": "error", "message": "no valid keys to update"})
 
-            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "config.json")
+            config_path = _project_config_path()
+            old_password = ""  # Store old password before update
             if os.path.exists(config_path):
                 with open(config_path, "r", encoding="utf-8") as f:
                     file_cfg = json.load(f)
+                    # Capture old password before updating
+                    if "web_password" in applied:
+                        old_password = file_cfg.get("web_password", "")
             else:
                 file_cfg = {}
             file_cfg.update(applied)
@@ -1770,6 +1951,26 @@ class ConfigHandler:
                 except Exception as lang_err:
                     logger.warning(f"[WebChannel] Failed to apply language: {lang_err}")
 
+            # Check if password was cleared: if there was a password before clearing,
+            # the service is likely bound to 0.0.0.0 (public), so warn the user.
+            password_warning = None
+            if "web_password" in applied:
+                new_password = applied["web_password"]
+                configured_host = file_cfg.get("web_host", "")
+
+                # If password was cleared and there was a password before
+                if not new_password and old_password:
+                    # If web_host is not explicitly set, the service auto-binds based on password
+                    # With password → 0.0.0.0 (public), without password → 127.0.0.1 (local)
+                    # So clearing password when it was previously set means going from public to local
+                    if not configured_host or configured_host == "0.0.0.0":
+                        password_warning = "password_cleared_with_public_host"
+                        logger.warning(
+                            "[WebChannel] Password cleared while service is likely bound to 0.0.0.0. "
+                            "Consider restarting the service to rebind to 127.0.0.1 "
+                            "or explicitly set web_host in config to prevent unauthorized access."
+                        )
+
             # Reset Bridge so that bot routing reflects the new config.
             # Without this, Bridge keeps its cached bot instance (e.g. LinkAIBot)
             # even after the user switches bot_type / use_linkai / model in UI.
@@ -1790,7 +1991,11 @@ class ConfigHandler:
                 except Exception as voice_err:
                     logger.warning(f"[WebChannel] Failed to refresh voice routing: {voice_err}")
 
-            return json.dumps({"status": "success", "applied": response_applied}, ensure_ascii=False)
+            return json.dumps({
+                "status": "success",
+                "applied": response_applied,
+                "warning": password_warning,
+            }, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error updating config: {e}")
             return json.dumps({"status": "error", "message": str(e)})
@@ -2124,9 +2329,12 @@ class ModelsHandler:
     # Anything not listed here intentionally hides the model dropdown so
     # users cannot pin a chat-only model and silently get a 4xx at runtime.
     _VISION_PROVIDER_MODELS = {
-        # OpenAI ordering matches the recommended GPT-5.4 family first, then
+        # OpenAI ordering puts the GPT-5.6 family first, then GPT-5.5/5.4,
         # GPT-5 and the GPT-4.1/4o backstops.
         "openai":    [
+            const.GPT_56_LUNA,
+            const.GPT_56_TERRA,
+            const.GPT_56_SOL,
             const.GPT_55,
             const.GPT_54,
             const.GPT_54_MINI,
@@ -2136,10 +2344,10 @@ class ModelsHandler:
             const.GPT_41_MINI,
             const.GPT_4o,
         ],
-        "doubao":    [const.DOUBAO_SEED_2_PRO],
+        "doubao":    [const.DOUBAO_SEED_2_1_PRO, const.DOUBAO_SEED_2_1_TURBO, const.DOUBAO_SEED_2_PRO],
         "moonshot":  [const.KIMI_K2_6],
         "dashscope": [const.QWEN37_PLUS, const.QWEN36_PLUS],
-        "claudeAPI": [const.CLAUDE_4_8_OPUS, const.CLAUDE_4_7_OPUS, const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS],
+        "claudeAPI": [const.CLAUDE_SONNET_5, const.CLAUDE_FABLE_5, const.CLAUDE_4_8_OPUS, const.CLAUDE_4_7_OPUS, const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS],
         "gemini":    [const.GEMINI_35_FLASH, const.GEMINI_31_FLASH_LITE_PRE, const.GEMINI_31_PRO_PRE, const.GEMINI_3_FLASH_PRE],
         "qianfan":   [const.ERNIE_45_TURBO_VL],
         # Zhipu's bot hard-codes the call to glm-5v-turbo regardless of what
@@ -2160,11 +2368,15 @@ class ModelsHandler:
             const.GPT_41_MINI,
             const.GPT_54_MINI,
             const.QWEN37_PLUS,
-            const.DOUBAO_SEED_2_PRO,
+            const.DOUBAO_SEED_2_1_PRO,
             const.KIMI_K2_6,
-            const.CLAUDE_4_6_SONNET,
+            const.CLAUDE_SONNET_5,
+            const.CLAUDE_FABLE_5,
             const.GEMINI_31_FLASH_LITE_PRE,
         ],
+        # Custom OpenAI-compatible providers have no preset list — model
+        # names vary per vendor, so the user types the model id manually.
+        "custom": [],
     }
 
     # Image-generation catalog. Source of truth: skills/image-generation/SKILL.md.
@@ -2201,10 +2413,7 @@ class ModelsHandler:
 
     @staticmethod
     def _config_path() -> str:
-        return os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "config.json",
-        )
+        return _project_config_path()
 
     @classmethod
     def _read_file_config(cls) -> dict:
@@ -2525,7 +2734,7 @@ class ModelsHandler:
         ("moonshot",  "moonshot_api_key",  const.KIMI_K2_6),
         ("doubao",    "ark_api_key",       const.DOUBAO_SEED_2_PRO),
         ("dashscope", "dashscope_api_key", const.QWEN37_PLUS),
-        ("claudeAPI", "claude_api_key",    const.CLAUDE_4_6_SONNET),
+        ("claudeAPI", "claude_api_key",    const.CLAUDE_SONNET_5),
         ("gemini",    "gemini_api_key",    const.GEMINI_35_FLASH),
         ("qianfan",   "qianfan_api_key",   const.ERNIE_45_TURBO_VL),
         ("zhipu",     "zhipu_ai_api_key",  const.GLM_5V_TURBO),
@@ -2612,18 +2821,31 @@ class ModelsHandler:
         user_specified = (vision_conf.get("model") or "").strip()
         explicit_provider = (vision_conf.get("provider") or "").strip()
 
+        # Build provider list: built-in providers + expanded custom:<id> entries.
+        # Same pattern as _embedding_capability — each user-created custom
+        # provider gets its own dropdown entry showing the user-chosen name.
+        providers = []
+        custom_cards = cls._custom_provider_cards(local_config)
+        for pid in cls._VISION_PROVIDER_MODELS:
+            if pid == "custom":
+                if custom_cards:
+                    providers.extend(c["id"] for c in custom_cards)
+            else:
+                providers.append(pid)
+
         # Provider resolution priority:
         #   1. Explicit `tools.vision.provider` (persisted via UI; supports
         #      custom model names that prefix-inference can't recognize).
         #   2. Scan per-provider model lists by model name.
         # Empty provider keeps the dropdown on "auto" when we can't tell.
         inferred_provider = ""
-        if explicit_provider and explicit_provider in cls._VISION_PROVIDER_MODELS:
+        if explicit_provider and explicit_provider in providers:
             inferred_provider = explicit_provider
         elif user_specified:
             for pid, models in cls._VISION_PROVIDER_MODELS.items():
                 if user_specified in models:
-                    inferred_provider = pid
+                    # For "custom" key, map to the first custom card
+                    inferred_provider = custom_cards[0]["id"] if pid == "custom" and custom_cards else pid
                     break
 
         # In auto mode the hint should reflect what vision.py will actually
@@ -2639,7 +2861,7 @@ class ModelsHandler:
             "current_model": user_specified,
             "fallback_provider": predicted["provider"],
             "fallback_model": predicted["model"],
-            "providers": list(cls._VISION_PROVIDER_MODELS.keys()),
+            "providers": providers,
             "provider_models": cls._VISION_PROVIDER_MODELS,
         }
 
@@ -2746,7 +2968,9 @@ class ModelsHandler:
         # recommend, so users don't have to expand the menu to find it.
         explicit = (local_config.get("embedding_provider") or "").strip().lower()
         provider_type = (local_config.get("embedding_provider_type") or "").strip().lower()
-        if explicit and explicit not in cls._EMBEDDING_PROVIDERS:
+        custom_cards = cls._custom_provider_cards(local_config)
+        custom_ids = {card["id"] for card in custom_cards}
+        if explicit and explicit not in cls._EMBEDDING_PROVIDERS and explicit not in custom_ids:
             explicit = ""
         suggested = ""
         if not explicit:
@@ -2758,9 +2982,25 @@ class ModelsHandler:
                 if key_field and cls._is_real_key(local_config.get(key_field, "")):
                     suggested = pid
                     break
+            if not suggested and custom_cards:
+                suggested = custom_cards[0]["id"]
         api_key = local_config.get("embedding_api_key", "")
         api_base = local_config.get("embedding_api_base", "")
         proxy = local_config.get("embedding_proxy", "")
+
+        # Build provider list: built-in providers + expanded custom:<id> entries
+        # Same pattern as _chat_capability — each user-created custom provider
+        # gets its own dropdown entry showing the user-chosen name.
+        providers = []
+        custom_cards = cls._custom_provider_cards(local_config)
+        for pid in cls._EMBEDDING_PROVIDERS:
+            if pid == "custom":
+                # Keep the dedicated custom embedding endpoint and also expose
+                # every reusable custom model-provider instance.
+                providers.append("custom")
+                providers.extend(c["id"] for c in custom_cards)
+            else:
+                providers.append(pid)
         return {
             "editable": True,
             "current_provider": explicit,
@@ -2768,7 +3008,7 @@ class ModelsHandler:
             "suggested_provider": suggested,
             "current_model": local_config.get("embedding_model", "") or "",
             "current_dim": int(local_config.get("embedding_dimensions") or 0) or None,
-            "providers": cls._EMBEDDING_PROVIDERS,
+            "providers": providers,
             "provider_models": cls._EMBEDDING_PROVIDER_MODELS,
             "dimension_options": {
                 "gemini": [768, 1536, 3072],
@@ -2790,8 +3030,6 @@ class ModelsHandler:
         main_provider = (local_config.get("bot_type") or "").strip()
         if main_provider == "chatGPT":
             main_provider = "openai"
-        if main_provider.startswith("custom:"):
-            main_provider = "custom"
         if not main_provider:
             model = (local_config.get("model") or "").strip().lower()
             if model.startswith("gemini"):
@@ -3165,10 +3403,10 @@ class ModelsHandler:
             {
               "action": "set_custom_provider",
               "id": "3f2a9c1b",             # required for edit; omit for create
-              "name": "siliconflow",         # required, display label
+              "name": "my-provider",         # required, display label
               "api_base": "https://...",     # required when creating
               "api_key": "sk-...",           # optional on edit (keep existing)
-              "model": "deepseek-ai/...",    # optional default model
+              "model": "model-name",         # optional default model
               "make_active": true            # optional, also activate it
             }
         """
@@ -3389,6 +3627,25 @@ class ModelsHandler:
         # is persisted so users picking a custom model under a specific vendor
         # still get routed there — runtime falls back to model-name prefix
         # inference only when provider is empty.
+        # Validate provider_id — mirrors _set_chat / _set_embedding pattern.
+        if provider_id.startswith("custom:"):
+            from models.custom_provider import parse_custom_bot_type
+            _, custom_id = parse_custom_bot_type(provider_id)
+            providers = self._normalize_custom_providers(conf().get("custom_providers"))
+            custom_provider = next((p for p in providers if p.get("id") == custom_id), None)
+            if custom_provider is None:
+                return json.dumps({"status": "error", "message": f"unknown custom provider id: {custom_id}"})
+            if not model:
+                model = custom_provider.get("model") or ""
+        elif provider_id and provider_id not in {k for k in ModelsHandler._VISION_PROVIDER_MODELS if k != "custom"}:
+            return json.dumps({"status": "error", "message": f"unknown provider: {provider_id}"})
+
+        if provider_id and not model:
+            return json.dumps({
+                "status": "error",
+                "message": "vision model is required when a provider is selected",
+            })
+
         local_config = conf()
         file_cfg = self._read_file_config()
         self._set_nested_namespace_value(file_cfg, "tools", "vision", "model", model)
@@ -3579,7 +3836,19 @@ class ModelsHandler:
 
     def _set_embedding(self, provider_id: str, model: str, data: dict = None) -> str:
         data = data or {}
-        # Two valid states: both empty (reset to pick-or-empty) OR both set.
+        # Validate provider_id — mirrors _set_chat's validation pattern.
+        if provider_id.startswith("custom:"):
+            from models.custom_provider import parse_custom_bot_type
+            _, custom_id = parse_custom_bot_type(provider_id)
+            providers = self._normalize_custom_providers(conf().get("custom_providers"))
+            custom_provider = next((p for p in providers if p.get("id") == custom_id), None)
+            if custom_provider is None:
+                return json.dumps({"status": "error", "message": f"unknown custom provider id: {custom_id}"})
+            # Fall back to the custom provider's default model when none is given.
+            if not model:
+                model = custom_provider.get("model") or ""
+        elif provider_id and provider_id not in ModelsHandler._EMBEDDING_PROVIDERS:
+            return json.dumps({"status": "error", "message": f"unknown provider: {provider_id}"})
         # A provider without a model leaves the runtime in a broken half-state,
         # so reject that explicitly instead of silently writing it through.
         if provider_id and not model:
@@ -3587,9 +3856,6 @@ class ModelsHandler:
                 "status": "error",
                 "message": "embedding model is required when a provider is selected",
             })
-        if provider_id and provider_id not in self._EMBEDDING_PROVIDERS:
-            return json.dumps({"status": "error", "message": f"unknown embedding provider: {provider_id}"})
-
         local_config = conf()
         file_cfg = self._read_file_config()
         provider_type = (data.get("embedding_provider_type") or "").strip().lower()
@@ -3710,309 +3976,6 @@ class ModelsHandler:
             logger.info("[ModelsHandler] Bridge bot routing reset")
         except Exception as e:
             logger.warning(f"[ModelsHandler] Bridge reset failed: {e}")
-
-
-class BrowserConfigHandler:
-    """API for browser backend configuration and health checks."""
-
-    @staticmethod
-    def _default_browser_config() -> dict:
-        return {
-            "enabled": True,
-            "engine": "playwright",
-            "playwright": {
-                "persistent": True,
-                "user_data_dir": "~/.cow/browser_profile",
-                "cdp_endpoint": "",
-                "idle_timeout": 300,
-            },
-            "camofox": {
-                "base_url": "http://127.0.0.1:9377",
-                "access_key": "",
-                "admin_key": "",
-                "auto_start": False,
-                "managed": False,
-                "port": 9377,
-                "user_id": "cow-agent",
-                "session_key": "default",
-            },
-            "camoufox": {
-                "persistent": True,
-                "user_data_dir": "~/.cow/camoufox_profile",
-                "headless": None,
-                "humanize": True,
-                "geoip": False,
-                "fingerprint_preset": False,
-                "os": "",
-                "proxy": "",
-                "idle_timeout": 10,
-            },
-            "proxy_default": False,
-            "backend_proxy": "",
-        }
-
-    @staticmethod
-    def _merge_defaults(cfg: dict) -> dict:
-        base = BrowserConfigHandler._default_browser_config()
-        if isinstance(cfg, dict):
-            for key, value in cfg.items():
-                if key in ("playwright", "camofox", "camoufox") and isinstance(value, dict):
-                    base[key].update(value)
-                else:
-                    base[key] = value
-        return base
-
-    @staticmethod
-    def _deep_update(base: dict, updates: dict) -> dict:
-        if not isinstance(updates, dict):
-            return base
-        for key, value in updates.items():
-            if isinstance(value, dict) and isinstance(base.get(key), dict):
-                BrowserConfigHandler._deep_update(base[key], value)
-            else:
-                base[key] = value
-        return base
-
-    @classmethod
-    def _current_config(cls) -> dict:
-        tools = conf().get("tools", {})
-        if not isinstance(tools, dict):
-            tools = {}
-        return cls._merge_defaults(tools.get("browser") if isinstance(tools.get("browser"), dict) else {})
-
-    @classmethod
-    def _merge_with_current(cls, incoming: dict = None) -> dict:
-        cfg = cls._current_config()
-        if isinstance(incoming, dict):
-            cls._deep_update(cfg, incoming)
-        return cls._merge_defaults(cfg)
-
-    @classmethod
-    def _config_path(cls) -> str:
-        return ModelsHandler._config_path()
-
-    @classmethod
-    def _read_file_config(cls) -> dict:
-        path = cls._config_path()
-        if not os.path.exists(path):
-            return {}
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    @classmethod
-    def _write_file_config(cls, data: dict) -> None:
-        with open(cls._config_path(), "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-
-    @staticmethod
-    def _mask_key(value: str) -> str:
-        if not value:
-            return ""
-        if len(value) <= 8:
-            return "*" * len(value)
-        return value[:4] + "*" * (len(value) - 8) + value[-4:]
-
-    @classmethod
-    def _public_config(cls, cfg: dict) -> dict:
-        public = json.loads(json.dumps(cfg))
-        backend_proxy = public.pop("backend_proxy", "") or ""
-        public["backend_proxy_masked"] = mask_proxy_url(backend_proxy)
-        public["backend_proxy_configured"] = bool(backend_proxy)
-        camofox_cfg = public.get("camofox")
-        if isinstance(camofox_cfg, dict):
-            access_key = camofox_cfg.pop("access_key", "") or ""
-            admin_key = camofox_cfg.pop("admin_key", "") or ""
-            camofox_cfg["access_key_masked"] = cls._mask_key(access_key)
-            camofox_cfg["admin_key_masked"] = cls._mask_key(admin_key)
-            camofox_cfg["admin_key_configured"] = bool(admin_key)
-        camoufox_cfg = public.get("camoufox")
-        if isinstance(camoufox_cfg, dict):
-            proxy = camoufox_cfg.pop("proxy", "") or ""
-            camoufox_cfg["proxy_masked"] = mask_proxy_url(proxy)
-            camoufox_cfg["proxy_configured"] = bool(proxy)
-        return public
-
-    @staticmethod
-    def _camofox_health(camofox_cfg: dict, backend_proxy: str = "") -> dict:
-        try:
-            import requests
-            base_url = (camofox_cfg.get("base_url") or "http://127.0.0.1:9377").rstrip("/")
-            headers = {}
-            access_key = (camofox_cfg.get("access_key") or "").strip()
-            if access_key:
-                headers["Authorization"] = f"Bearer {access_key}"
-            resp = requests.get(
-                f"{base_url}/health",
-                headers=headers,
-                timeout=5,
-                proxies=proxy_dict(backend_proxy),
-            )
-            if resp.status_code >= 400:
-                return {"ok": False, "status_code": resp.status_code, "error": resp.text[:300]}
-            data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
-            return {"ok": True, "status_code": resp.status_code, **data}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    @staticmethod
-    def _playwright_available() -> bool:
-        try:
-            import playwright  # noqa: F401
-            return True
-        except Exception:
-            return False
-
-    @staticmethod
-    def _camoufox_health() -> dict:
-        try:
-            import camoufox  # noqa: F401
-        except Exception as e:
-            return {
-                "ok": False,
-                "installed": False,
-                "engine": "camoufox",
-                "error": str(e),
-                "install_hint": "python3 -m pip install -U camoufox && python3 -m camoufox fetch",
-            }
-        try:
-            from camoufox.pkgman import launch_path
-            browser_path = launch_path()
-            ok = bool(browser_path and os.path.exists(browser_path))
-            return {
-                "ok": ok,
-                "installed": True,
-                "engine": "camoufox",
-                "browser_path": browser_path,
-                **({} if ok else {"error": "Camoufox browser runtime not found", "install_hint": "python3 -m camoufox fetch"}),
-            }
-        except Exception as e:
-            return {
-                "ok": False,
-                "installed": True,
-                "engine": "camoufox",
-                "error": str(e),
-                "install_hint": "python3 -m camoufox fetch",
-            }
-
-    @classmethod
-    def _apply_runtime_config(cls, browser_cfg: dict) -> None:
-        local_config = conf()
-        tools = local_config.get("tools", {})
-        if not isinstance(tools, dict):
-            tools = {}
-        tools["browser"] = browser_cfg
-        local_config["tools"] = tools
-        try:
-            from agent.tools.tool_manager import ToolManager
-            tm = ToolManager()
-            if not hasattr(tm, "tool_configs") or not isinstance(tm.tool_configs, dict):
-                tm.tool_configs = {}
-            tm.tool_configs["browser"] = browser_cfg
-            from agent.tools.browser.browser_tool import BrowserTool
-            if browser_cfg.get("enabled", True) is False:
-                tm.tool_classes.pop("browser", None)
-            elif "browser" not in tm.tool_classes:
-                tm.tool_classes["browser"] = BrowserTool
-            BrowserTool.reset_shared_service()
-            logger.info("[BrowserConfig] Browser tool runtime config refreshed")
-        except Exception as e:
-            logger.warning(f"[BrowserConfig] runtime refresh failed: {e}")
-
-    def GET(self):
-        _require_auth()
-        web.header("Content-Type", "application/json; charset=utf-8")
-        try:
-            cfg = self._current_config()
-            camofox_cfg = cfg.get("camofox") or {}
-            public_cfg = self._public_config(cfg)
-            engine = cfg.get("engine", "playwright")
-            camofox_health = (
-                self._camofox_health(camofox_cfg, cfg.get("backend_proxy", ""))
-                if engine in ("camofox", "auto")
-                else {"ok": None, "engine": "playwright"}
-            )
-            camoufox_health = self._camoufox_health() if engine == "camoufox" else {"ok": None, "engine": "camoufox"}
-            return json.dumps({
-                "status": "success",
-                "config": public_cfg,
-                "public": {
-                    "engine": engine,
-                    "playwright_available": self._playwright_available(),
-                    "camofox": public_cfg.get("camofox", {}),
-                    "camofox_health": camofox_health,
-                    "camoufox": public_cfg.get("camoufox", {}),
-                    "camoufox_health": camoufox_health,
-                },
-            }, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"[BrowserConfig] GET failed: {e}")
-            return json.dumps({"status": "error", "message": str(e)})
-
-    def POST(self):
-        _require_auth()
-        web.header("Content-Type", "application/json; charset=utf-8")
-        try:
-            data = json.loads(web.data() or b"{}")
-            action = (data.get("action") or "save").strip().lower()
-            if action == "test":
-                cfg = self._merge_with_current(data.get("config") if isinstance(data.get("config"), dict) else None)
-                engine = (cfg.get("engine") or "playwright").strip().lower()
-                if engine == "playwright":
-                    ok = self._playwright_available()
-                    return json.dumps({"status": "success", "health": {"ok": ok, "engine": "playwright"}}, ensure_ascii=False)
-                if engine == "camoufox":
-                    return json.dumps({"status": "success", "health": self._camoufox_health()}, ensure_ascii=False)
-                health = self._camofox_health(cfg.get("camofox") or {}, cfg.get("backend_proxy", ""))
-                if engine == "auto" and not health.get("ok"):
-                    health["fallback_playwright_available"] = self._playwright_available()
-                return json.dumps({"status": "success", "health": health}, ensure_ascii=False)
-            if action == "start":
-                cfg = self._merge_with_current(data.get("config") if isinstance(data.get("config"), dict) else None)
-                from agent.tools.browser.camofox_service import CamofoxBrowserService
-                result = CamofoxBrowserService(cfg).start()
-                return json.dumps({"status": "success" if result.get("ok") else "error", "result": result}, ensure_ascii=False)
-            if action == "stop":
-                cfg = self._merge_with_current(data.get("config") if isinstance(data.get("config"), dict) else None)
-                from agent.tools.browser.camofox_service import CamofoxBrowserService
-                result = CamofoxBrowserService(cfg).stop()
-                return json.dumps({"status": "success" if result.get("ok") else "error", "result": result}, ensure_ascii=False)
-            if action not in ("save", "switch"):
-                return json.dumps({"status": "error", "message": f"unknown action: {action!r}"})
-
-            incoming = data.get("config") or {}
-            if not isinstance(incoming, dict):
-                return json.dumps({"status": "error", "message": "config must be an object"})
-            cfg = self._merge_with_current(incoming)
-            engine = (cfg.get("engine") or "playwright").strip().lower()
-            if engine not in ("playwright", "camofox", "camoufox", "auto"):
-                return json.dumps({"status": "error", "message": f"invalid engine: {engine}"})
-            cfg["enabled"] = cfg.get("enabled", True) is not False
-            cfg["engine"] = engine
-            try:
-                cfg["backend_proxy"] = normalize_proxy_url(cfg.get("backend_proxy", ""))
-                camoufox_cfg = cfg.get("camoufox")
-                if isinstance(camoufox_cfg, dict):
-                    camoufox_cfg["proxy"] = normalize_proxy_url(camoufox_cfg.get("proxy", ""))
-                    try:
-                        camoufox_cfg["idle_timeout"] = max(0, int(camoufox_cfg.get("idle_timeout", 10)))
-                    except Exception:
-                        camoufox_cfg["idle_timeout"] = 10
-            except ValueError as proxy_err:
-                return json.dumps({"status": "error", "message": str(proxy_err)})
-
-            file_cfg = self._read_file_config()
-            tools = file_cfg.get("tools")
-            if not isinstance(tools, dict):
-                tools = {}
-            tools["browser"] = cfg
-            file_cfg["tools"] = tools
-            self._write_file_config(file_cfg)
-            self._apply_runtime_config(cfg)
-            logger.info(f"[BrowserConfig] browser config saved: engine={engine}")
-            return json.dumps({"status": "success", "config": self._public_config(cfg)}, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"[BrowserConfig] POST failed: {e}")
-            return json.dumps({"status": "error", "message": str(e)})
 
 
 class VideoParseConfigHandler:
@@ -4725,9 +4688,11 @@ class ChannelsHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
+            from common import i18n
             local_config = conf()
             active_channels = self._active_channel_set()
             channels = []
+            is_hant = i18n.get_language() == i18n.ZH_HANT
             for ch_name, ch_def in self.CHANNEL_DEFS.items():
                 fields_out = []
                 for f in ch_def["fields"]:
@@ -4736,16 +4701,32 @@ class ChannelsHandler:
                         display_val = self._mask_secret(str(raw_val))
                     else:
                         display_val = raw_val
+
+                    label_val = f["label"]
+                    if is_hant and isinstance(label_val, str):
+                        label_val = i18n.to_traditional(label_val)
+                    elif is_hant and isinstance(label_val, dict):
+                        label_val = label_val.copy()
+                        label_val["zh-Hant"] = i18n.to_traditional(label_val.get("zh", ""))
+
                     fields_out.append({
                         "key": f["key"],
-                        "label": f["label"],
+                        "label": label_val,
                         "type": f["type"],
                         "value": display_val,
                         "default": f.get("default", ""),
                     })
+
+                label_val = ch_def["label"]
+                if is_hant and isinstance(label_val, str):
+                    label_val = i18n.to_traditional(label_val)
+                elif is_hant and isinstance(label_val, dict):
+                    label_val = label_val.copy()
+                    label_val["zh-Hant"] = i18n.to_traditional(label_val.get("zh", ""))
+
                 ch_info = {
                     "name": ch_name,
-                    "label": ch_def["label"],
+                    "label": label_val,
                     "icon": ch_def["icon"],
                     "color": ch_def["color"],
                     "active": ch_name in active_channels,
@@ -4810,8 +4791,7 @@ class ChannelsHandler:
         if not applied:
             return json.dumps({"status": "error", "message": "no valid fields to update"})
 
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "config.json")
+        config_path = _project_config_path()
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 file_cfg = json.load(f)
@@ -4881,8 +4861,7 @@ class ChannelsHandler:
         new_channel_type = ",".join(existing)
         local_config["channel_type"] = new_channel_type
 
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "config.json")
+        config_path = _project_config_path()
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 file_cfg = json.load(f)
@@ -4937,8 +4916,7 @@ class ChannelsHandler:
         local_config = conf()
         local_config["channel_type"] = new_channel_type
 
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "config.json")
+        config_path = _project_config_path()
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 file_cfg = json.load(f)
@@ -5307,16 +5285,26 @@ class ToolsHandler:
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
             from agent.tools.tool_manager import ToolManager
+            from common import i18n
             tm = ToolManager()
             if not tm.tool_classes:
                 tm.load_tools()
             tools = []
+            lang = i18n.get_language()
             for name, cls in tm.tool_classes.items():
                 try:
                     instance = cls()
+                    desc = instance.description
+                    if lang == i18n.ZH_HANT and desc:
+                        desc = i18n.to_traditional(desc)
+                    elif lang == "en" and name == "scheduler":
+                        desc = (
+                            "Create, query and manage scheduled tasks (reminders, periodic tasks, etc.).\n\n"
+                            "⚠️ IMPORTANT: Only use this tool when delayed or periodic execution is needed."
+                        )
                     tools.append({
                         "name": name,
-                        "description": instance.description,
+                        "description": desc,
                     })
                 except Exception:
                     tools.append({"name": name, "description": ""})
@@ -5333,10 +5321,17 @@ class SkillsHandler:
         try:
             from agent.skills.service import SkillService
             from agent.skills.manager import SkillManager
+            from common import i18n
             workspace_root = _get_workspace_root()
             manager = SkillManager(custom_dir=os.path.join(workspace_root, "skills"))
             service = SkillService(manager)
             skills = service.query()
+            if i18n.get_language() == i18n.ZH_HANT:
+                for skill in skills:
+                    if isinstance(skill, dict):
+                        for k, v in list(skill.items()):
+                            if k in ("name", "description", "display_name") and isinstance(v, str):
+                                skill[k] = i18n.to_traditional(v)
             return json.dumps({"status": "success", "skills": skills}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Skills API error: {e}")
@@ -5422,6 +5417,163 @@ class SchedulerHandler:
             return json.dumps({"status": "success", "tasks": tasks}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler API error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerToggleHandler:
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            body = json.loads(web.data())
+            task_id = body.get("task_id")
+            enabled = body.get("enabled", True)
+            if not task_id:
+                return json.dumps({"status": "error", "message": "task_id required"})
+            from agent.tools.scheduler.task_store import TaskStore
+            workspace_root = _get_workspace_root()
+            store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
+            store = TaskStore(store_path)
+            store.enable_task(task_id, enabled)
+            task = store.get_task(task_id)
+            return json.dumps({"status": "success", "task": task}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler toggle error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerUpdateHandler:
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            body = json.loads(web.data())
+            task_id = body.get("task_id")
+            if not task_id:
+                return json.dumps({"status": "error", "message": "task_id required"})
+
+            from agent.tools.scheduler.task_store import TaskStore
+            from agent.tools.scheduler.scheduler_service import SchedulerService
+            from datetime import datetime
+            workspace_root = _get_workspace_root()
+            store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
+            store = TaskStore(store_path)
+
+            # Get original task (single query to avoid repeated I/O)
+            original_task = store.get_task(task_id)
+            if not original_task:
+                return json.dumps({"status": "error", "message": f"Task '{task_id}' not found"})
+
+            # Build updates dict
+            updates = {}
+            if "name" in body:
+                updates["name"] = body["name"]
+            if "enabled" in body:
+                updates["enabled"] = body["enabled"]
+
+            # Update schedule
+            if "schedule" in body:
+                updates["schedule"] = body["schedule"]
+                # If schedule config changed, recalculate next_run_at
+                # Build merged temp task data for calculation (without modifying the original object)
+                merged = dict(original_task)
+                merged.update(updates)
+                if "action" in body:
+                    merged["action"] = body["action"]
+                temp_service = SchedulerService(store, lambda t: None)
+                next_run = temp_service._calculate_next_run(merged, datetime.now())
+                if next_run:
+                    updates["next_run_at"] = next_run.isoformat()
+                else:
+                    # Cannot calculate next run time, schedule config may be invalid
+                    return json.dumps({
+                        "status": "error",
+                        "message": "Cannot calculate next run time. Please check the schedule config (e.g., cron expression format, or whether the one-time task time has already passed)."
+                    }, ensure_ascii=False)
+
+            # Update action
+            if "action" in body:
+                # Get the task's original channel_type
+                original_action = original_task.get("action", {})
+                if not isinstance(original_action, dict):
+                    original_action = {}
+                action_patch = body["action"]
+                if not isinstance(action_patch, dict):
+                    return json.dumps({
+                        "status": "error",
+                        "message": "Action must be an object."
+                    }, ensure_ascii=False)
+
+                # The Web editor only exposes a subset of action fields. Merge
+                # that patch into the stored action so scheduler metadata such
+                # as notify_session_id, silent, and channel-specific delivery
+                # fields survive unrelated edits.
+                action = dict(original_action)
+                action.update(action_patch)
+                action_type = action.get("type")
+                if action_type == "send_message":
+                    action.pop("task_description", None)
+                    action.pop("silent", None)
+                elif action_type == "agent_task":
+                    action.pop("content", None)
+
+                old_channel = original_action.get("channel_type", "web")
+                channel_type = action.get("channel_type") or old_channel
+                action["channel_type"] = channel_type
+
+                # If channel type changed or no receiver, reject the update.
+                # Note: the web UI disables the channel selector, so this branch
+                # is only reachable via direct API calls. Changing a task's channel
+                # after creation is not supported because the receiver identity is
+                # channel-bound and cannot be trivially re-populated (e.g. weixin
+                # requires a valid context_token tied to the original user-session).
+                if old_channel and old_channel != channel_type:
+                    return json.dumps({
+                        "status": "error",
+                        "message": f"Cannot change channel type from '{old_channel}' to '{channel_type}'. Please create a new task on the target channel instead."
+                    }, ensure_ascii=False)
+                if not action.get("receiver"):
+                    return json.dumps({
+                        "status": "error",
+                        "message": "Receiver is required. Please create a new task through the chat interface."
+                    }, ensure_ascii=False)
+                updates["action"] = action
+
+                # If schedule was not updated but action was, ensure next_run_at exists
+                if "schedule" not in body and "next_run_at" not in original_task:
+                    merged = dict(original_task)
+                    merged.update(updates)
+                    temp_service = SchedulerService(store, lambda t: None)
+                    next_run = temp_service._calculate_next_run(merged, datetime.now())
+                    if next_run:
+                        updates["next_run_at"] = next_run.isoformat()
+
+            store.update_task(task_id, updates)
+            task = store.get_task(task_id)
+            return json.dumps({"status": "success", "task": task}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler update error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerDeleteHandler:
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            body = json.loads(web.data())
+            task_id = body.get("task_id")
+            if not task_id:
+                return json.dumps({"status": "error", "message": "task_id required"})
+
+            from agent.tools.scheduler.task_store import TaskStore
+            workspace_root = _get_workspace_root()
+            store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
+            store = TaskStore(store_path)
+            store.delete_task(task_id)
+            return json.dumps({"status": "success"}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler delete error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 
@@ -5589,10 +5741,10 @@ class MessageDeleteHandler:
             user_seq = data.get('user_seq')
             delete_user = data.get('delete_user', True)
             cascade = data.get('cascade', False)
-            
+
             if not session_id or user_seq is None:
                 return json.dumps({"status": "error", "message": "session_id and user_seq required"})
-            
+
             # 1. Delete from database
             from agent.memory import get_conversation_store
             store = get_conversation_store()
@@ -5601,7 +5753,7 @@ class MessageDeleteHandler:
             # 2. Sync agent's in-memory context so its next turn sees the
             # same history as the DB. Handled by the agent_bridge helper.
             try:
-                from bridge import Bridge
+                from bridge.bridge import Bridge
                 Bridge().get_agent_bridge().sync_session_messages_from_store(session_id)
             except Exception as sync_err:
                 logger.warning(f"[WebChannel] Failed to sync agent memory: {sync_err}")
@@ -5751,6 +5903,90 @@ class KnowledgeGraphHandler:
         except Exception as e:
             logger.error(f"[WebChannel] Knowledge graph error: {e}")
             return json.dumps({"nodes": [], "links": []})
+
+
+class KnowledgeActionHandler:
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            body = json.loads(web.data() or b"{}")
+            action = body.get("action", "")
+            payload = body.get("payload") or {}
+            from agent.knowledge.service import KnowledgeService
+            result = KnowledgeService(_get_workspace_root()).dispatch(action, payload)
+            return json.dumps({
+                "status": "success" if result["code"] < 300 else "error",
+                **result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Knowledge action error: {e}")
+            return json.dumps({"status": "error", "code": 500, "message": str(e), "payload": None})
+
+
+class KnowledgeImportHandler:
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            from agent.knowledge.service import KnowledgeService
+            content_length = int(getattr(web.ctx, "env", {}).get("CONTENT_LENGTH") or 0)
+            if content_length > KnowledgeService.MAX_IMPORT_TOTAL_SIZE:
+                return json.dumps({
+                    "status": "error",
+                    "code": 413,
+                    "message": "import batch too large",
+                    "payload": None,
+                })
+            params = _raw_web_input()
+            target_category = params.get("target_category", "")
+            conflict_strategy = params.get("conflict_strategy", "skip")
+            uploaded = _ensure_list(params.get("files"))
+            single = params.get("file")
+            if single is not None:
+                uploaded.append(single)
+            if not uploaded:
+                return json.dumps({"status": "error", "code": 400, "message": "No files uploaded", "payload": None})
+            if len(uploaded) > KnowledgeService.MAX_IMPORT_FILES:
+                return json.dumps({
+                    "status": "error",
+                    "code": 400,
+                    "message": f"too many files: max {KnowledgeService.MAX_IMPORT_FILES}",
+                    "payload": None,
+                })
+
+            files = []
+            total_size = 0
+            for file_obj in uploaded:
+                if file_obj is None:
+                    continue
+                filename = getattr(file_obj, "filename", "") or getattr(file_obj, "name", "")
+                content = _read_uploaded_file_bytes_limited(file_obj, KnowledgeService.MAX_IMPORT_FILE_SIZE)
+                total_size += len(content)
+                if total_size > KnowledgeService.MAX_IMPORT_TOTAL_SIZE:
+                    return json.dumps({
+                        "status": "error",
+                        "code": 413,
+                        "message": "import batch too large",
+                        "payload": None,
+                    })
+                files.append({
+                    "filename": filename,
+                    "content": content,
+                })
+
+            result = KnowledgeService(_get_workspace_root()).dispatch("import_documents", {
+                "target_category": target_category,
+                "conflict_strategy": conflict_strategy,
+                "files": files,
+            })
+            return json.dumps({
+                "status": "success" if result["code"] < 300 else "error",
+                **result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Knowledge import error: {e}", exc_info=True)
+            return json.dumps({"status": "error", "code": 500, "message": str(e), "payload": None})
 
 
 class VersionHandler:

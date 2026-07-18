@@ -15,11 +15,12 @@ websocket-client==1.2.0
 # google
 google-generativeai
 
-# browser backends
-camoufox
-
 # file parsing (web_fetch document support)
 pypdf
 python-docx
 openpyxl
 python-pptx
+
+# i18n: Traditional Chinese (zh-Hant) high-quality conversion
+# Built-in fallback provides basic conversion without this dependency
+opencc-python-reimplemented

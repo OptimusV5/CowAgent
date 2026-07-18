@@ -71,6 +71,22 @@ class ToolManager:
         if not hasattr(self, '_mcp_active_configs'):
             # server_name -> normalized config dict, for diff-based reload.
             self._mcp_active_configs: dict = {}
+        if not hasattr(self, '_mcp_tool_vectors'):
+            # mcp_tool_name -> embedding vector, used by on-demand tool
+            # retrieval. Populated lazily on first retrieval so users who
+            # never enable the feature pay zero embedding cost.
+            self._mcp_tool_vectors: dict = {}
+        if not hasattr(self, '_mcp_vector_lock'):
+            # Guards incremental index builds so concurrent turns don't
+            # double-embed the same newly-loaded MCP tools.
+            self._mcp_vector_lock = threading.Lock()
+        if not hasattr(self, '_embedding_provider_initialized'):
+            # The embedding provider is created once, lazily, and reused for
+            # both tool-index and per-query embeddings. None means keyword-only
+            # mode (no provider configured) — retrieval then falls back to full
+            # injection at the caller.
+            self._embedding_provider_initialized = False
+            self._embedding_provider = None
 
     def load_tools(self, tools_dir: str = "", config_dict=None):
         """
@@ -136,14 +152,7 @@ class ToolManager:
                                 except ImportError as e:
                                     # Handle missing dependencies with helpful messages
                                     error_msg = str(e)
-                                    if "playwright" in error_msg:
-                                        logger.warning(
-                                            f"[ToolManager] Browser tool not loaded - missing dependencies.\n"
-                                            f"  To enable browser tool, run:\n"
-                                            f"    pip install playwright\n"
-                                            f"    playwright install chromium"
-                                        )
-                                    elif "markdownify" in error_msg:
+                                    if "markdownify" in error_msg:
                                         logger.warning(
                                             f"[ToolManager] {cls.__name__} not loaded - missing markdownify.\n"
                                             f"  Install with: pip install markdownify"
@@ -206,14 +215,7 @@ class ToolManager:
                             except ImportError as e:
                                 # Handle missing dependencies with helpful messages
                                 error_msg = str(e)
-                                if "playwright" in error_msg:
-                                    logger.warning(
-                                        f"[ToolManager] Browser tool not loaded - missing dependencies.\n"
-                                        f"  To enable browser tool, run:\n"
-                                        f"    pip install playwright\n"
-                                        f"    playwright install chromium"
-                                    )
-                                elif "markdownify" in error_msg:
+                                if "markdownify" in error_msg:
                                     logger.warning(
                                         f"[ToolManager] {cls.__name__} not loaded - missing markdownify.\n"
                                         f"  Install with: pip install markdownify"
@@ -230,8 +232,6 @@ class ToolManager:
         try:
             # Get tools configuration
             tools_config = config_dict or conf().get("tools", {})
-            if not isinstance(tools_config, dict):
-                tools_config = {}
 
             # Record tools that are configured but not loaded
             missing_tools = []
@@ -239,29 +239,15 @@ class ToolManager:
             # Store configurations for later use when instantiating
             self.tool_configs = tools_config
 
-            if not self._is_tool_enabled("browser", tools_config):
-                if "browser" in self.tool_classes:
-                    self.tool_classes.pop("browser", None)
-                    logger.info("[ToolManager] Browser tool disabled by tools.browser.enabled=false")
-
             # Check which configured tools are missing
             for tool_name in tools_config:
-                if not self._is_tool_enabled(tool_name, tools_config):
-                    continue
                 if tool_name not in self.tool_classes:
                     missing_tools.append(tool_name)
 
             # If there are missing tools, record warnings
             if missing_tools:
                 for tool_name in missing_tools:
-                    if tool_name == "browser":
-                        logger.warning(
-                            f"[ToolManager] Browser tool is configured but not loaded.\n"
-                            f"  To enable browser tool, run:\n"
-                            f"    pip install playwright\n"
-                            f"    playwright install chromium"
-                        )
-                    elif tool_name == "google_search":
+                    if tool_name == "google_search":
                         logger.warning(
                             f"[ToolManager] Google Search tool is configured but may need API key.\n"
                             f"  Get API key from: https://serper.dev\n"
@@ -272,13 +258,6 @@ class ToolManager:
 
         except Exception as e:
             logger.error(f"Error configuring tools from config: {e}")
-
-    def _is_tool_enabled(self, tool_name: str, tools_config: dict = None) -> bool:
-        tools = tools_config if isinstance(tools_config, dict) else getattr(self, "tool_configs", {})
-        cfg = tools.get(tool_name) if isinstance(tools, dict) else None
-        if isinstance(cfg, dict) and cfg.get("enabled") is False:
-            return False
-        return True
 
     def _mcp_json_path(self) -> str:
         import os
@@ -466,21 +445,30 @@ class ToolManager:
         the others, and never raises out of the worker thread.
         """
         try:
-            from agent.tools.mcp.mcp_client import McpClient, McpClientRegistry
+            from agent.tools.mcp.mcp_client import McpClient, McpClientRegistry, set_reload_callback
             from agent.tools.mcp.mcp_tool import McpTool
 
             registry = McpClientRegistry()
             self._mcp_registry = registry
+            # Let the OAuth web callback bring a server online once authorized.
+            set_reload_callback(self.reload_mcp_server)
 
             for cfg in mcp_servers_config:
                 server_name = cfg.get("name", "<unnamed>")
                 try:
                     client = McpClient(cfg)
                     if not client.initialize():
-                        self._mcp_status[server_name] = "failed"
-                        logger.warning(
-                            f"[MCP] Server '{server_name}' failed to initialize — skipping"
-                        )
+                        if getattr(client, "needs_auth", False):
+                            self._mcp_status[server_name] = "needs_auth"
+                            logger.info(
+                                f"[MCP] Server '{server_name}' needs authorization — "
+                                f"waiting for the user to complete the OAuth flow"
+                            )
+                        else:
+                            self._mcp_status[server_name] = "failed"
+                            logger.warning(
+                                f"[MCP] Server '{server_name}' failed to initialize — skipping"
+                            )
                         continue
 
                     tool_schemas = client.list_tools()
@@ -518,6 +506,28 @@ class ToolManager:
         except Exception as e:
             logger.warning(f"[ToolManager] MCP background loader crashed: {e}")
 
+    def reload_mcp_server(self, server_name: str) -> None:
+        """Re-initialize a single MCP server (e.g. after OAuth authorization).
+
+        Tears down any existing client for the server and starts it again in
+        the background, so a freshly-stored access token is picked up and the
+        server's tools become available on the next message.
+        """
+        with self._mcp_lock:
+            cfg = self._mcp_active_configs.get(server_name)
+        if not cfg:
+            logger.warning(f"[MCP] reload requested for unknown server '{server_name}'")
+            return
+        logger.info(f"[MCP] Reloading server '{server_name}' after authorization")
+        self._teardown_mcp_server(server_name)
+        self._mcp_status[server_name] = "pending"
+        threading.Thread(
+            target=self._load_mcp_tools_async,
+            args=([cfg],),
+            daemon=True,
+            name=f"mcp-reload-{server_name}",
+        ).start()
+
     def list_mcp_status(self) -> dict:
         """Return {server_name: status} snapshot for UI / debugging."""
         return dict(self._mcp_status)
@@ -537,6 +547,16 @@ class ToolManager:
         Returns (added_names, removed_names) for logging.
         """
         if agent is None or not hasattr(agent, "tools"):
+            return ([], [])
+
+        # Never re-inject MCP tools into a restricted Self-Evolution review agent.
+        # The review agent is created with a deliberately reduced, workspace-guarded
+        # toolset; silently re-adding configured MCP tools here would bypass that
+        # policy boundary (see agent/evolution/executor.py). The flag may live on
+        # the agent itself (Agent) or on the wrapping stream executor's .agent.
+        if getattr(agent, "_evolution_restricted", False) or getattr(
+            getattr(agent, "agent", None), "_evolution_restricted", False
+        ):
             return ([], [])
 
         from agent.tools.mcp.mcp_tool import McpTool
@@ -580,6 +600,91 @@ class ToolManager:
 
         return (sorted(added), sorted(removed))
 
+    # ------------------------------------------------------------------
+    # On-demand MCP tool retrieval support
+    #
+    # The vector index and the embedding provider are owned here (singleton,
+    # process-wide, aligned with the MCP tool lifecycle). The context-aware
+    # selection itself lives in agent.tools.mcp.tool_retrieval, driven by the
+    # executor which is the only place that knows the conversation context.
+    # ------------------------------------------------------------------
+
+    def count_mcp_tools(self) -> int:
+        """Return the number of currently loaded MCP tools."""
+        return len(self._mcp_tool_instances)
+
+    def get_mcp_tool_vectors(self) -> dict:
+        """Return ``{mcp_tool_name: vector}`` for currently loaded MCP tools.
+
+        Lazily embeds any MCP tools not yet in the cache (MCP servers load
+        asynchronously, so tools may appear over time). Returns an empty dict
+        when no embedding provider is available or embedding fails — the caller
+        then falls back to full injection. Never raises.
+        """
+        try:
+            self._ensure_mcp_tool_vectors()
+        except Exception as e:
+            logger.debug(f"[ToolManager] MCP tool vector build skipped: {e}")
+        return dict(self._mcp_tool_vectors)
+
+    def embed_query(self, text: str):
+        """Embed a retrieval query with the shared provider.
+
+        Returns the embedding vector, or None if no provider is available or
+        the call fails (caller falls back to full injection). Never raises.
+        """
+        if not text:
+            return None
+        provider = self._get_embedding_provider()
+        if provider is None:
+            return None
+        try:
+            return provider.embed_query(text)
+        except Exception as e:
+            logger.debug(f"[ToolManager] query embedding failed: {e}")
+            return None
+
+    def _ensure_mcp_tool_vectors(self) -> None:
+        """Incrementally embed MCP tools that are not yet cached."""
+        # Snapshot to avoid concurrent-mutation while the async loader runs.
+        current = dict(self._mcp_tool_instances)
+        missing = [name for name in current if name not in self._mcp_tool_vectors]
+        if not missing:
+            return
+
+        provider = self._get_embedding_provider()
+        if provider is None:
+            return
+
+        with self._mcp_vector_lock:
+            # Re-check under lock: another thread may have filled these in.
+            missing = [name for name in current if name not in self._mcp_tool_vectors]
+            if not missing:
+                return
+            texts = [self._mcp_tool_embed_text(current[name]) for name in missing]
+            vectors = provider.embed_batch(texts)
+            for name, vec in zip(missing, vectors):
+                self._mcp_tool_vectors[name] = vec
+
+    @staticmethod
+    def _mcp_tool_embed_text(tool) -> str:
+        """Build the text that represents an MCP tool for embedding."""
+        name = getattr(tool, "name", "") or ""
+        description = getattr(tool, "description", "") or ""
+        return f"{name}: {description}".strip()
+
+    def _get_embedding_provider(self):
+        """Lazily create and cache the shared embedding provider (or None)."""
+        if not self._embedding_provider_initialized:
+            try:
+                from agent.memory.embedding import create_default_embedding_provider
+                self._embedding_provider = create_default_embedding_provider()
+            except Exception as e:
+                logger.warning(f"[ToolManager] embedding provider init failed: {e}")
+                self._embedding_provider = None
+            self._embedding_provider_initialized = True
+        return self._embedding_provider
+
     def create_tool(self, name: str) -> BaseTool:
         """
         Get a new instance of a tool by name.
@@ -587,8 +692,6 @@ class ToolManager:
         :param name: The name of the tool to get.
         :return: A new instance of the tool or None if not found.
         """
-        if not self._is_tool_enabled(name):
-            return None
         tool_class = self.tool_classes.get(name)
         if tool_class:
             # Create a new instance
@@ -615,8 +718,6 @@ class ToolManager:
         """
         result = {}
         for name, tool_class in self.tool_classes.items():
-            if not self._is_tool_enabled(name):
-                continue
             # Create a temporary instance to get schema
             temp_instance = tool_class()
             result[name] = {

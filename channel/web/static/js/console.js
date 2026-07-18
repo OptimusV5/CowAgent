@@ -114,6 +114,10 @@ const I18N = {
         knowledge_select_hint: '选择一个文档查看', knowledge_empty_hint: '暂无知识页面',
         knowledge_empty_guide: '在对话中发送文档、链接或主题给 Agent，它会自动整理到你的知识库中。',
         knowledge_go_chat: '开始对话',
+        knowledge_new: '新建',
+        knowledge_new_category: '新建分类',
+        knowledge_new_document: '新建文档',
+        knowledge_import_documents: '导入文档',
         welcome_subtitle: '我可以帮你解答问题、管理计算机、创造和执行技能，并通过<br>长期记忆和知识库不断成长',
         example_sys_title: '系统管理', example_sys_text: '查看工作空间里有哪些文件',
         example_task_title: '定时任务', example_task_text: '1分钟后提醒我检查服务器',
@@ -145,23 +149,6 @@ const I18N = {
         input_placeholder: '输入消息，或输入 / 使用指令',
         config_title: '配置管理', config_desc: '管理模型和 Agent 配置',
         config_model: '模型配置', config_agent: 'Agent 配置',
-        config_browser: '浏览器工具',
-        config_browser_enabled: '启用浏览器工具',
-        config_browser_enabled_hint: '关闭后，Agent 不会看到 browser 工具，已有浏览器会被释放。',
-        config_browser_engine: '浏览器后端',
-        config_browser_managed: '托管进程',
-        config_browser_autostart: '自动启动',
-        config_browser_test: '测试连接',
-        config_browser_start: '启动',
-        config_browser_stop: '停止',
-        config_browser_ok: '连接正常',
-        config_browser_failed: '连接失败',
-        config_browser_backend_proxy: '浏览器后端代理',
-        config_browser_backend_proxy_hint: '用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。',
-        config_browser_camoufox_auto_os: '自动',
-        config_browser_camoufox_proxy_hint: '用于 Camoufox 浏览器页面访问外网。默认不启用，需 agent 传 use_proxy 或开启默认启用。',
-        config_browser_proxy_default: '默认启用页面代理',
-        config_browser_proxy_default_hint: '关闭时，仅在 agent 调用 browser 工具并传 use_proxy: true 时启用已保存的 Camoufox 页面代理。',
         config_video_parse: '视频解析工具',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
@@ -234,8 +221,9 @@ const I18N = {
         config_custom_tip: '接口需遵循 OpenAI API 协议',
         config_security: '安全设置', config_password: '访问密码',
         config_password_hint: '留空则不启用密码保护',
-        config_password_changed: '密码已更新，请重新登录',
+        config_password_changed: '密码已更新',
         config_password_cleared: '密码已清除',
+        config_password_security_warning: '⚠️ 警告：目前密码为空且对外连接埠开放，建议重启服务，或检查是否调整监听位址绑定。',
         skills_title: '技能管理', skills_desc: '查看、启用或禁用 Agent 工具和技能', skills_hub_btn: '探索技能广场',
         skills_loading: '加载技能中...', skills_loading_desc: '技能加载后将显示在此处',
         tools_section_title: '内置工具', tools_loading: '加载工具中...',
@@ -279,6 +267,30 @@ const I18N = {
         feishu_mode_scan: '扫码创建', feishu_mode_manual: '手动填写',
         tasks_title: '定时任务', tasks_desc: '查看和管理定时任务',
         tasks_coming: '即将推出', tasks_coming_desc: '定时任务管理功能即将在此提供',
+        task_add_btn: '新增任务',
+        task_edit_title: '编辑定时任务',
+        task_add_title: '新增定时任务',
+        task_name: '任务名称',
+        task_enabled: '启用任务',
+        task_schedule_type: '调度类型',
+        task_schedule_cron: 'Cron 表达式',
+        task_schedule_interval: '固定间隔',
+        task_schedule_once: '一次性任务',
+        task_cron_expression: 'Cron 表达式',
+        task_cron_hint: '格式: 分 时 日 月 周，例如 "0 9 * * *" 表示每天 9:00',
+        task_interval_seconds: '间隔秒数',
+        task_interval_hint: '最小 60 秒，例如 3600 表示每小时执行一次',
+        task_once_time: '执行时间',
+        task_action_type: '动作类型',
+        task_action_send_message: '发送消息',
+        task_action_agent_task: 'AI 任务',
+        task_channel_type: '通道类型',
+        task_channel_hint: '选择定时消息发送的通道',
+        task_message_content: '消息内容',
+        task_task_description: '任务描述',
+        task_delete_btn: '删除任务',
+        task_delete_confirm_title: '删除定时任务',
+        task_delete_confirm_msg: '确定删除该定时任务吗？此操作无法撤销。',
         logs_title: '日志', logs_desc: '实时日志输出 (run.log)',
         logs_live: '实时', logs_coming_msg: '日志流即将在此提供。将连接 run.log 实现类似 tail -f 的实时输出。',
         new_chat: '新对话',
@@ -286,6 +298,7 @@ const I18N = {
         today: '今天', yesterday: '昨天', earlier: '更早',
         delete_session_confirm: '确认删除该会话？所有消息将被清除。',
         delete_session_title: '删除会话',
+        rename_session: '重命名',
         delete_message_confirm: '确认删除这条消息？',
         delete_message_title: '删除消息',
         edit_disabled_reply_active: '正在生成回复，暂时无法编辑。',
@@ -316,7 +329,255 @@ const I18N = {
         regenerate_response: '重新生成',
         edit_save: '保存并发送',
         edit_cancel: '取消',
+        logout: '退出',
     },
+    'zh-Hant': {
+
+        console: '控制台',
+        nav_chat: '對話', nav_manage: '管理', nav_monitor: '監控',
+        menu_chat: '對話', menu_config: '設定', menu_models: '模型', menu_skills: '技能',
+        menu_memory: '記憶', menu_knowledge: '知識', menu_channels: '管道', menu_tasks: '定時',
+        menu_logs: '日誌',
+        models_title: '模型管理',
+        models_desc: '統一管理對話、影像、語音、向量、搜尋能力',
+        models_section_vendors: '廠商憑據',
+        models_section_vendors_desc: '一處設定，多個模型能力共享',
+        models_section_capabilities: '模型能力',
+        models_add_vendor: '新增廠商',
+        models_provider: '廠商',
+        models_model: '模型',
+        models_voice: '音色',
+        models_configured: '已設定',
+        models_not_configured: '未設定',
+        models_pick_to_configure: '選擇以設定',
+        models_clear_credential: '清除憑據',
+        models_base_default_hint: '留空將使用官方預設地址',
+        models_base_default: '預設',
+        models_custom_vendor_label: '自定義',
+        models_custom_name: '名稱',
+        models_custom_delete: '刪除',
+        models_custom_delete_confirm_title: '刪除自定義廠商',
+        models_custom_delete_confirm_msg: '確定刪除該自定義廠商嗎？此操作無法撤銷。',
+        models_custom_name_required: '請填寫名稱',
+        models_custom_base_required: '請填寫 API Base',
+        models_custom_edit_title: '編輯自定義廠商',
+        models_custom_add_title: '新增自定義廠商',
+        models_capability_chat: '主模型',
+        models_capability_chat_desc: '用於基礎對話和 Agent 推理',
+        models_capability_vision: '影像理解',
+        models_capability_vision_desc: '識別圖片內容，用於影像識別工具',
+        models_capability_image: '影像生成',
+        models_capability_image_desc: '生成圖片，用於影像生成技能',
+        models_auto_using: '當前優先使用',
+        models_capability_asr: '語音識別',
+        models_capability_asr_desc: '語音轉文字',
+        models_capability_tts: '語音合成',
+        models_capability_tts_desc: '文字轉語音',
+        models_capability_embedding: '向量',
+        models_capability_embedding_desc: '用於記憶與知識的向量化檢索',
+        models_capability_search: '聯網搜尋',
+        models_capability_search_desc: '實時網頁檢索能力，用於搜尋工具',
+        models_strategy_auto: '自動',
+        models_search_strategy_label: '策略',
+        models_search_strategy_fixed: '指定',
+        models_search_strategy_auto_hint: '從已設定廠商中自動選擇',
+        models_search_strategy_fixed_hint: '指定使用搜尋廠商',
+        models_pending_config: '待設定',
+        models_search_available_label: '可用搜尋廠商：',
+        models_search_none_configured: '暫未啟用任何搜尋廠商，點選新增',
+        models_search_add_provider: '新增廠商',
+        models_search_add_desc: '選擇一個搜尋廠商進行設定',
+        models_search_bocha_title: '設定博查 API Key',
+        models_search_bocha_desc: '前往博查開放平臺建立 API Key',
+        models_search_edit_hint: '點選修改設定',
+        models_unavailable: '不可用',
+        models_set_via_env: '透過環境變數啟用',
+        models_dim_label: '維度',
+        models_save_success: '已儲存',
+        models_save_failed: '儲存失敗',
+        models_cleared: '已清除',
+        models_clear_failed: '清除失敗',
+        models_embedding_change_title: '更改向量模型',
+        models_embedding_change_msg: '切換向量模型後，已有索引將失效，需要重建。是否繼續？',
+        models_embedding_saved_title: '向量模型已更新',
+        models_embedding_saved_msg: '請在聊天框輸入 /memory rebuild-index 重建索引。',
+        models_embedding_saved_ok: '去執行',
+        models_pick_provider: '待選擇',
+        models_clear_confirm_title: '清除廠商憑據',
+        models_clear_confirm_msg: '確認清除該廠商的 API Key 與 Base URL 嗎？相關能力將不再可用。',
+        cancel: '取消',
+        save: '儲存',
+        ok: '確定',
+        knowledge_title: '知識庫', knowledge_desc: '瀏覽和探索你的知識庫',
+        knowledge_tab_docs: '檔案', knowledge_tab_graph: '圖譜',
+        knowledge_loading: '載入知識庫中...', knowledge_loading_desc: '知識頁面將顯示在這裡',
+        knowledge_select_hint: '選擇一個檔案檢視', knowledge_empty_hint: '暫無知識頁面',
+        knowledge_empty_guide: '在對話中傳送檔案、連結或主題給 Agent，它會自動整理到你的知識庫中。',
+        knowledge_go_chat: '開始對話',
+        knowledge_new: '新建',
+        knowledge_new_category: '新建分類',
+        knowledge_new_document: '新建檔案',
+        knowledge_import_documents: '匯入檔案',
+        welcome_subtitle: '我可以幫你解答問題、管理電腦、創造和執行技能，並透過<br>長期記憶和知識庫不斷成長',
+        example_sys_title: '系統管理', example_sys_text: '檢視工作空間裡有哪些檔案',
+        example_task_title: '定時任務', example_task_text: '1分鐘後提醒我檢查伺服器',
+        example_code_title: '程式設計助手', example_code_text: '搜尋AI資訊並生成視覺化網頁報告',
+        example_knowledge_title: '知識庫', example_knowledge_text: '檢視知識庫當前檔案情況',
+        example_skill_title: '技能系統', example_skill_text: '檢視所有支援的工具和技能',
+        example_web_title: '指令中心', example_web_text: '檢視全部命令',
+        slash_help: '顯示命令幫助',
+        slash_status: '檢視執行狀態',
+        slash_context: '檢視對話上下文',
+        slash_context_clear: '清除對話上下文',
+        slash_skill_list: '檢視已安裝技能',
+        slash_skill_list_remote: '瀏覽技能廣場',
+        slash_skill_search: '搜尋技能',
+        slash_skill_install: '安裝技能 (名稱或 GitHub URL)',
+        slash_skill_uninstall: '解除安裝技能',
+        slash_skill_info: '檢視技能詳情',
+        slash_skill_enable: '啟用技能',
+        slash_skill_disable: '禁用技能',
+        slash_memory_dream: '手動觸發記憶蒸餾 (可指定天數, 預設3)',
+        slash_knowledge: '檢視知識庫統計',
+        slash_knowledge_list: '檢視知識庫檔案樹',
+        slash_knowledge_on: '開啟知識庫',
+        slash_knowledge_off: '關閉知識庫',
+        slash_config: '檢視當前設定',
+        slash_cancel: '中止當前正在執行的 Agent 任務',
+        slash_logs: '檢視最近日誌',
+        slash_version: '檢視版本',
+        input_placeholder: '輸入訊息，或輸入 / 使用指令',
+        config_title: '設定管理', config_desc: '管理模型和 Agent 設定',
+        config_model: '模型設定', config_agent: 'Agent 設定',
+        config_language: '語言', config_language_hint: '介面展示、命令文案、系統提示詞等使用的語言（與右上角切換同步）',
+        config_model_advanced: '高階設定',
+        config_channel: '管道設定',
+        config_agent_enabled: 'Agent 模式',
+        config_max_tokens: '最大上下文 Token', config_max_tokens_hint: '對話中 Agent 能輸入的最大 Token 長度，超過後會智慧壓縮處理',
+        config_max_turns: '最大記憶輪次', config_max_turns_hint: '一問一答為一輪，超過後會智慧壓縮處理',
+        config_max_steps: '最大執行步數', config_max_steps_hint: '單次對話中 Agent 最多呼叫工具的次數',
+        config_enable_thinking: '深度思考', config_enable_thinking_hint: '是否啟用深度思考模式',
+        config_self_evolution: '自主進化', config_self_evolution_hint: '會話空閒後自動覆盤，沉澱記憶、最佳化技能、處理未完成事項',
+        evolution_badge: '自主學習',
+        config_channel_type: '管道型別',
+        config_provider: '模型廠商', config_model_name: '模型',
+        config_custom_model_hint: '輸入自定義模型名稱',
+        config_save: '儲存', config_saved: '已儲存',
+        config_save_error: '儲存失敗',
+        config_custom_option: '自定義',
+        config_custom_tip: '介面需遵循 OpenAI API 協議',
+        config_security: '安全設定', config_password: '訪問密碼',
+        config_password_hint: '留空則不啟用密碼保護',
+        config_password_changed: '密碼已更新',
+        config_password_cleared: '密碼已清除',
+        config_password_security_warning: '⚠️ 警告：目前密碼為空且對外連接埠開放，建議重啟服務，或檢查是否調整監聽位址綁定。',
+        skills_title: '技能管理', skills_desc: '檢視、啟用或禁用 Agent 工具和技能', skills_hub_btn: '探索技能廣場',
+        skills_loading: '載入技能中...', skills_loading_desc: '技能載入後將顯示在此處',
+        tools_section_title: '內建工具', tools_loading: '載入工具中...',
+        skills_section_title: '技能', skill_enable: '啟用', skill_disable: '禁用',
+        skill_toggle_error: '操作失敗，請稍後再試',
+        memory_title: '記憶管理', memory_desc: '檢視 Agent 記憶檔案和內容',
+        memory_tab_files: '記憶檔案', memory_tab_dreams: '自主進化',
+        memory_loading: '載入記憶檔案中...', memory_loading_desc: '記憶檔案將顯示在此處',
+        memory_back: '返回列表',
+        memory_col_name: '檔名', memory_col_type: '型別', memory_col_size: '大小', memory_col_updated: '更新時間',
+        channels_title: '管道管理', channels_desc: '管理已接入的訊息管道',
+        channels_add: '接入管道', channels_disconnect: '斷開',
+        channels_save: '儲存設定', channels_saved: '已儲存', channels_save_error: '儲存失敗',
+        channels_restarted: '已儲存並重啟',
+        channels_connect_btn: '接入', channels_cancel: '取消',
+        channels_select_placeholder: '選擇要接入的管道...',
+        channels_empty: '暫未接入任何管道', channels_empty_desc: '點選右上角「接入管道」按鈕開始設定',
+        channels_disconnect_confirm: '確認斷開該管道？設定將保留但管道會停止執行。',
+        channels_connected: '已接入', channels_connecting: '接入中...',
+        weixin_scan_title: '微信掃碼登入', weixin_scan_desc: '請使用微信掃描下方二維碼',
+        weixin_scan_loading: '正在獲取二維碼...', weixin_scan_waiting: '等待掃碼...',
+        weixin_scan_scanned: '已掃碼，請在手機上確認', weixin_scan_expired: '二維碼已過期，正在重新整理...',
+        weixin_scan_success: '登入成功，正在啟動管道...', weixin_scan_fail: '獲取二維碼失敗',
+        weixin_qr_tip: '二維碼約2分鐘後過期',
+        wecom_scan_btn: '掃碼建立企微機器人', wecom_scan_desc: '使用企業微信掃碼，一鍵建立智慧機器人',
+        wecom_scan_success: '建立成功，正在啟動管道...',
+        wecom_scan_fail: '建立失敗',
+        wecom_mode_scan: '掃碼接入', wecom_mode_manual: '手動填寫',
+        feishu_scan_btn: '一鍵建立飛書應用',
+        feishu_scan_desc: '使用飛書 App 掃碼，自動建立應用並預置全部許可權與事件訂閱',
+        feishu_scan_replace_desc: '使用飛書 App 掃碼建立新機器人，將覆蓋當前的 App ID / Secret',
+        feishu_scan_loading: '正在向飛書申請二維碼...',
+        feishu_scan_waiting: '等待掃碼...',
+        feishu_scan_tip: '二維碼 10 分鐘內有效，僅供一次掃描',
+        feishu_scan_open_link: '或點選此處在瀏覽器中開啟',
+        feishu_scan_success: '應用建立成功，正在啟動管道...',
+        feishu_scan_expired: '二維碼已過期，請重試',
+        feishu_scan_denied: '已取消授權',
+        feishu_scan_fail: '建立失敗',
+        feishu_scan_retry: '重試',
+        feishu_mode_scan: '掃碼建立', feishu_mode_manual: '手動填寫',
+        tasks_title: '定時任務', tasks_desc: '檢視和管理定時任務',
+        tasks_coming: '即將推出', tasks_coming_desc: '定時任務管理功能即將在此提供',
+        task_add_btn: '新增任務',
+        task_edit_title: '編輯定時任務',
+        task_add_title: '新增定時任務',
+        task_name: '任務名稱',
+        task_enabled: '啟用任務',
+        task_schedule_type: '排程型別',
+        task_schedule_cron: 'Cron 表示式',
+        task_schedule_interval: '固定間隔',
+        task_schedule_once: '一次性任務',
+        task_cron_expression: 'Cron 表示式',
+        task_cron_hint: '格式: 分 時 日 月 周，例如 "0 9 * * *" 表示每天 9:00',
+        task_interval_seconds: '間隔秒數',
+        task_interval_hint: '最小 60 秒，例如 3600 表示每小時執行一次',
+        task_once_time: '執行時間',
+        task_action_type: '動作型別',
+        task_action_send_message: '傳送訊息',
+        task_action_agent_task: 'AI 任務',
+        task_channel_type: '管道型別',
+        task_channel_hint: '選擇定時訊息傳送的管道',
+        task_message_content: '訊息內容',
+        task_task_description: '任務描述',
+        task_delete_btn: '刪除任務',
+        task_delete_confirm_title: '刪除定時任務',
+        task_delete_confirm_msg: '確定刪除該定時任務嗎？此操作無法撤銷。',
+        logs_title: '日誌', logs_desc: '實時日誌輸出 (run.log)',
+        logs_live: '實時', logs_coming_msg: '日誌流即將在此提供。將連線 run.log 實現類似 tail -f 的實時輸出。',
+        new_chat: '新對話',
+        session_history: '歷史會話',
+        today: '今天', yesterday: '昨天', earlier: '更早',
+        delete_session_confirm: '確認刪除該會話？所有訊息將被清除。',
+        delete_session_title: '刪除會話',
+        rename_session: '重新命名',
+        delete_message_confirm: '確認刪除這條訊息？',
+        delete_message_title: '刪除訊息',
+        edit_disabled_reply_active: '正在生成回覆，暫時無法編輯。',
+        delete_disabled_reply_active: '正在生成回覆，暫時無法刪除。',
+        untitled_session: '新對話',
+        context_cleared: '— 以上內容已從上下文中移除 —',
+        tip_new_chat: '新建對話',
+        tip_clear_context: '清除上下文',
+        tip_attach: '新增附件',
+        attach_menu_file: '上傳檔案',
+        mic_idle_title: '點選錄音 / 再按一次結束',
+        mic_recording_title: '錄音中，再次點選結束',
+        mic_busy_title: '識別中…',
+        mic_permission_denied: '無法訪問麥克風，請檢查瀏覽器許可權',
+        mic_too_short: '錄音太短，請重試',
+        mic_error: '語音識別失敗',
+        speak_msg: '朗讀這段回覆',
+        voice_reply_mode_label: '語音回覆策略',
+        voice_reply_off: '關閉',
+        voice_reply_if_voice: '僅語音問/語音答',
+        voice_reply_always: '總是語音回覆',
+        attach_menu_folder: '上傳資料夾',
+        confirm_yes: '確認',
+        confirm_cancel: '取消',
+        error_send: '傳送失敗，請稍後再試。', error_timeout: '請求超時，請再試一次。',
+        thinking_in_progress: '思考中...', thinking_done: '已深度思考', thinking_duration: '耗時',
+        edit_message: '編輯訊息',
+        regenerate_response: '重新生成',
+        edit_save: '儲存併傳送',
+        edit_cancel: '取消',
+        logout: '登出',
+        },
     en: {
         console: 'Console',
         nav_chat: 'Chat', nav_manage: 'Management', nav_monitor: 'Monitor',
@@ -420,6 +681,10 @@ const I18N = {
         knowledge_select_hint: 'Select a document to view', knowledge_empty_hint: 'No knowledge pages yet',
         knowledge_empty_guide: 'Send documents, links or topics to the agent in chat, and it will automatically organize them into your knowledge base.',
         knowledge_go_chat: 'Start a conversation',
+        knowledge_new: 'New',
+        knowledge_new_category: 'New category',
+        knowledge_new_document: 'New document',
+        knowledge_import_documents: 'Import documents',
         welcome_subtitle: 'I can help you answer questions, manage your computer, create and execute skills, and keep growing through <br> long-term memory and a personal knowledge base.',
         example_sys_title: 'System', example_sys_text: 'Show me the files in the workspace',
         example_task_title: 'Scheduler', example_task_text: 'Remind me to check the server in 5 minutes',
@@ -451,23 +716,6 @@ const I18N = {
         input_placeholder: 'Type a message, or press / for commands',
         config_title: 'Configuration', config_desc: 'Manage model and agent settings',
         config_model: 'Model Configuration', config_agent: 'Agent Configuration',
-        config_browser: 'Browser Tool',
-        config_browser_enabled: 'Enable Browser Tool',
-        config_browser_enabled_hint: 'When disabled, the agent cannot see the browser tool and any active browser is released.',
-        config_browser_engine: 'Browser Backend',
-        config_browser_managed: 'Managed Process',
-        config_browser_autostart: 'Auto Start',
-        config_browser_test: 'Test Connection',
-        config_browser_start: 'Start',
-        config_browser_stop: 'Stop',
-        config_browser_ok: 'Connection OK',
-        config_browser_failed: 'Connection failed',
-        config_browser_backend_proxy: 'Browser Backend Proxy',
-        config_browser_backend_proxy_hint: 'Used only for CowAgent connecting to the Camofox REST API. It does not affect browser page traffic.',
-        config_browser_camoufox_auto_os: 'Auto',
-        config_browser_camoufox_proxy_hint: 'Routes Camoufox page traffic through this proxy. Off by default unless use_proxy is passed or default-on is enabled below.',
-        config_browser_proxy_default: 'Enable page proxy by default',
-        config_browser_proxy_default_hint: 'When off, the saved Camoufox page proxy is used only when the agent passes use_proxy: true on browser tool calls.',
         config_video_parse: 'Video Parse Tool',
         config_video_api_key: 'Gemini API Key',
         config_video_api_base: 'Gemini API Base',
@@ -540,8 +788,9 @@ const I18N = {
         config_custom_tip: 'API must follow OpenAI protocol.',
         config_security: 'Security', config_password: 'Password',
         config_password_hint: 'Leave empty to disable password protection',
-        config_password_changed: 'Password updated, please re-login',
+        config_password_changed: 'Password updated',
         config_password_cleared: 'Password cleared',
+        config_password_security_warning: '⚠️ Warning: Password is now empty and the port is exposed. Consider restarting the service or adjusting the listening address binding.',
         skills_title: 'Skills', skills_desc: 'View, enable, or disable agent tools and skills', skills_hub_btn: 'Skill Hub',
         skills_loading: 'Loading skills...', skills_loading_desc: 'Skills will be displayed here after loading',
         tools_section_title: 'Built-in Tools', tools_loading: 'Loading tools...',
@@ -585,6 +834,30 @@ const I18N = {
         feishu_mode_scan: 'Scan QR', feishu_mode_manual: 'Manual',
         tasks_title: 'Scheduled Tasks', tasks_desc: 'View and manage scheduled tasks',
         tasks_coming: 'Coming Soon', tasks_coming_desc: 'Scheduled task management will be available here',
+        task_add_btn: 'Add Task',
+        task_edit_title: 'Edit Task',
+        task_add_title: 'Add Task',
+        task_name: 'Task Name',
+        task_enabled: 'Enable Task',
+        task_schedule_type: 'Schedule Type',
+        task_schedule_cron: 'Cron Expression',
+        task_schedule_interval: 'Fixed Interval',
+        task_schedule_once: 'One-time Task',
+        task_cron_expression: 'Cron Expression',
+        task_cron_hint: 'Format: minute hour day month weekday, e.g. "0 9 * * *" means daily at 9:00',
+        task_interval_seconds: 'Interval (seconds)',
+        task_interval_hint: 'Minimum 60 seconds, e.g. 3600 means once per hour',
+        task_once_time: 'Execution Time',
+        task_action_type: 'Action Type',
+        task_action_send_message: 'Send Message',
+        task_action_agent_task: 'AI Task',
+        task_channel_type: 'Channel Type',
+        task_channel_hint: 'Select the channel to send scheduled messages',
+        task_message_content: 'Message Content',
+        task_task_description: 'Task Description',
+        task_delete_btn: 'Delete Task',
+        task_delete_confirm_title: 'Delete Task',
+        task_delete_confirm_msg: 'Delete this scheduled task? This action cannot be undone.',
         logs_title: 'Logs', logs_desc: 'Real-time log output (run.log)',
         logs_live: 'Live', logs_coming_msg: 'Log streaming will be available here. Connects to run.log for real-time output similar to tail -f.',
         new_chat: 'New Chat',
@@ -592,6 +865,7 @@ const I18N = {
         today: 'Today', yesterday: 'Yesterday', earlier: 'Earlier',
         delete_session_confirm: 'Delete this session? All messages will be removed.',
         delete_session_title: 'Delete Session',
+        rename_session: 'Rename',
         delete_message_confirm: 'Delete this message?',
         delete_message_title: 'Delete Message',
         edit_disabled_reply_active: 'Reply is being generated; editing is temporarily unavailable.',
@@ -622,6 +896,7 @@ const I18N = {
         regenerate_response: 'Regenerate',
         edit_save: 'Save and send',
         edit_cancel: 'Cancel',
+        logout: 'Logout',
     }
 };
 
@@ -635,6 +910,9 @@ let currentLang = (typeof window.__cowResolveLang__ === 'function')
             if (!raw) return '';
             const v = String(raw).trim().toLowerCase();
             if (v === 'auto') return '';
+            // Handle Traditional Chinese variants first (more specific)
+            if (v === 'zh-hant' || v.startsWith('zh-hant-') || v === 'zh-tw' || v === 'zh-hk') return 'zh-Hant';
+            // Then Simplified Chinese
             if (v.indexOf('zh') === 0) return 'zh';
             if (v.indexOf('en') === 0) return 'en';
             return '';
@@ -669,7 +947,7 @@ function applyI18n() {
         el.placeholder = t(el.dataset['i18nPlaceholder']);
     });
     document.querySelectorAll('[data-i18n-title]').forEach(el => {
-        el.title = t(el.dataset.i18nTitle);
+        el.title = t(el.dataset['i18nTitle']);
     });
     document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
         el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
@@ -678,8 +956,25 @@ function applyI18n() {
         el.setAttribute('data-tooltip', t(el.dataset.tipKey));
     });
     installCfgTipPortal();
+
+    // Clear any status messages when language changes
+    document.querySelectorAll('[id$="-status"]').forEach(el => {
+        el.classList.add('opacity-0');
+    });
+
     const langLabel = document.getElementById('lang-label');
-    if (langLabel) langLabel.textContent = currentLang === 'zh' ? '中文' : 'EN';
+    if (langLabel) {
+        if (currentLang === 'zh-Hant') langLabel.textContent = '繁体';
+        else if (currentLang === 'zh') langLabel.textContent = '简体';
+        else langLabel.textContent = 'EN';
+    }
+    // Highlight the active option in the header language dropdown menu.
+    document.querySelectorAll('#lang-menu .lang-menu-item').forEach(item => {
+        const active = item.dataset.lang === currentLang;
+        item.classList.toggle('text-blue-600', active);
+        item.classList.toggle('dark:text-blue-400', active);
+        item.classList.toggle('font-medium', active);
+    });
     // Point the docs link to the locale-specific documentation site.
     const docsLink = document.getElementById('docs-link');
     if (docsLink) docsLink.href = currentLang === 'zh' ? 'https://docs.cowagent.ai/zh' : 'https://docs.cowagent.ai';
@@ -689,7 +984,7 @@ function applyI18n() {
 // persists the user choice locally, re-renders the UI, and binds the choice to
 // the backend `cow_lang` config so logs / agent replies / CLI follow suit.
 function setLanguage(lang) {
-    const next = (lang === 'en') ? 'en' : 'zh';
+    const next = (lang === 'en' || lang === 'zh' || lang === 'zh-Hant') ? lang : 'zh';
     if (next === currentLang) {
         // Still persist + sync in case storage/backend drifted from the UI.
         syncLanguageToBackend(next);
@@ -699,47 +994,89 @@ function setLanguage(lang) {
     localStorage.setItem('cow_lang', currentLang);
     applyI18n();
     _applyInputTooltips();
-    // Re-render views whose DOM is built in JS (data-i18n alone does not
-    // cover strings interpolated via t() into innerHTML).
-    try { rerenderDynamicViews(); } catch (e) {}
     // Keep the language switch button and config selector visually in sync.
     try { updateLangControls(); } catch (e) {}
-    syncLanguageToBackend(currentLang);
+
+    // Sync language choice to backend first, then trigger dynamic views reload
+    // to avoid race conditions on API endpoints.
+    syncLanguageToBackend(currentLang, () => {
+        try { rerenderDynamicViews(); } catch (e) {}
+    });
 }
 
 // Persist the language to the backend `cow_lang` config (best-effort; the UI
 // has already switched locally, so a network failure is non-blocking).
-function syncLanguageToBackend(lang) {
+function syncLanguageToBackend(lang, callback) {
     try {
         fetch('/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ updates: { cow_lang: lang } })
-        }).catch(() => {});
-    } catch (e) {}
+        })
+        .then(() => { if (callback) callback(); })
+        .catch(() => { if (callback) callback(); });
+    } catch (e) {
+        if (callback) callback();
+    }
 }
 
 // Reflect the current language on both the top-right toggle and the config
 // selector (if present), so the two entry points stay synchronized.
 function updateLangControls() {
     const langLabel = document.getElementById('lang-label');
-    if (langLabel) langLabel.textContent = currentLang === 'zh' ? '中文' : 'EN';
+    if (langLabel) {
+        if (currentLang === 'zh-Hant') langLabel.textContent = '繁体';
+        else if (currentLang === 'zh') langLabel.textContent = '简体';
+        else langLabel.textContent = 'EN';
+    }
+    // Highlight the active option in the header language dropdown menu.
+    document.querySelectorAll('#lang-menu .lang-menu-item').forEach(item => {
+        const active = item.dataset.lang === currentLang;
+        item.classList.toggle('text-blue-600', active);
+        item.classList.toggle('dark:text-blue-400', active);
+        item.classList.toggle('font-medium', active);
+    });
     // The config language picker is the custom .cfg-dropdown component. Only
     // sync it once it has been initialized (i.e. the config panel was opened).
     const sel = document.getElementById('cfg-lang-select');
     if (sel && sel._ddValue !== undefined && sel._ddValue !== currentLang) {
         sel._ddValue = currentLang;
         const textEl = sel.querySelector('.cfg-dropdown-text');
-        if (textEl) textEl.textContent = currentLang === 'zh' ? '中文' : 'English';
+        if (textEl) {
+            if (currentLang === 'zh-Hant') textEl.textContent = '繁體中文';
+            else if (currentLang === 'zh') textEl.textContent = '简体中文';
+            else textEl.textContent = 'English';
+        }
         sel.querySelectorAll('.cfg-dropdown-item').forEach(i => {
             i.classList.toggle('active', i.dataset.value === currentLang);
         });
     }
 }
 
-function toggleLanguage() {
-    setLanguage(currentLang === 'zh' ? 'en' : 'zh');
+// Toggle the header language dropdown menu open/closed.
+function toggleLangMenu(event) {
+    if (event) event.stopPropagation();
+    const menu = document.getElementById('lang-menu');
+    if (menu) menu.classList.toggle('hidden');
 }
+
+// Pick a language from the dropdown, then close the menu.
+function selectLanguage(lang) {
+    const menu = document.getElementById('lang-menu');
+    if (menu) menu.classList.add('hidden');
+    setLanguage(lang);
+}
+window.toggleLangMenu = toggleLangMenu;
+window.selectLanguage = selectLanguage;
+
+// Close the language menu when clicking outside of it.
+document.addEventListener('click', (e) => {
+    const selector = document.getElementById('lang-selector');
+    const menu = document.getElementById('lang-menu');
+    if (menu && !menu.classList.contains('hidden') && selector && !selector.contains(e.target)) {
+        menu.classList.add('hidden');
+    }
+});
 
 // Refresh JS-rendered views after a language switch. Each branch uses the
 // lightweight in-memory re-render path (no extra network round-trips).
@@ -748,11 +1085,23 @@ function rerenderDynamicViews() {
             && modelsState && (modelsState.providers || modelsState.capabilities)) {
         renderModelsView();
     }
-    if (currentView === 'config' && typeof initBrowserConfigView === 'function' && browserConfigState) {
-        initBrowserConfigView(browserConfigState);
+    // Reload task list after language switch
+    if (currentView === 'tasks') {
+        tasksLoaded = false;
+        loadTasksView();
     }
-    if (currentView === 'config' && typeof initVideoParseConfigView === 'function' && videoParseConfigState) {
-        initVideoParseConfigView(videoParseConfigState);
+    // Reload skills and tools after language switch
+    if (currentView === 'skills') {
+        toolsLoaded = false;
+        loadSkillsView();
+    }
+    // Reload channels after language switch
+    if (currentView === 'channels') {
+        loadChannelsView();
+    }
+    // Reload config after language switch
+    if (currentView === 'config') {
+        loadConfigView();
     }
 }
 
@@ -861,6 +1210,12 @@ function navigateTo(viewId) {
     document.getElementById('breadcrumb-page').textContent = t(meta.page);
     document.getElementById('breadcrumb-page').dataset.i18n = meta.page;
     currentView = viewId;
+
+    // Clear status messages when navigating away
+    document.querySelectorAll('[id$="-status"]').forEach(el => {
+        el.classList.add('opacity-0');
+    });
+
     if (window.innerWidth < 1024) closeSidebar();
 }
 
@@ -933,6 +1288,33 @@ function createMd() {
                 try { return hljsLib.highlight(str, { language: lang }).value; } catch (_) {}
             }
             return hljsLib.highlightAuto(str).value;
+        }
+    });
+    // Fix greedy linkify: markdown-it's linkify swallows markdown emphasis (*)
+    // and CJK full-width punctuation glued to a URL (common in LLM output like
+    // "**https://x**，中文"), turning the whole tail into one broken link. Cut
+    // the URL at the first such char and spill the remainder back as text.
+    var GREEDY_LINK_CUT = /[*\u3000-\u303F\uFF00-\uFFEF]/;
+    md.core.ruler.after('linkify', 'fix_greedy_linkify', function(state) {
+        for (var b = 0; b < state.tokens.length; b++) {
+            var blk = state.tokens[b];
+            if (blk.type !== 'inline' || !blk.children) continue;
+            var ch = blk.children;
+            for (var i = 0; i < ch.length; i++) {
+                var open = ch[i];
+                if (open.type !== 'link_open' || open.markup !== 'linkify') continue;
+                var textTok = ch[i + 1], close = ch[i + 2];
+                if (!textTok || textTok.type !== 'text' || !close || close.type !== 'link_close') continue;
+                var idx = textTok.content.search(GREEDY_LINK_CUT);
+                if (idx < 0) continue;
+                var keep = textTok.content.slice(0, idx);
+                var spill = textTok.content.slice(idx);
+                textTok.content = keep;
+                open.attrSet('href', keep);
+                var spillTok = new state.Token('text', '', 0);
+                spillTok.content = spill;
+                ch.splice(i + 3, 0, spillTok);
+            }
         }
     });
     const defaultLinkOpen = md.renderer.rules.link_open || function(tokens, idx, options, env, self) {
@@ -1069,19 +1451,19 @@ function _addCodeBlockHeaders(container) {
     const preBlocks = container.querySelectorAll('pre');
     preBlocks.forEach(pre => {
         if (pre.parentElement && pre.parentElement.classList.contains('code-block-wrapper')) return;
-        
+
         const codeEl = pre.querySelector('code');
         if (!codeEl) return;
-        
+
         const langClass = Array.from(codeEl.classList).find(c => c.startsWith('language-'));
         const language = langClass ? langClass.replace('language-', '') : '';
         // Hide label for unknown/empty languages (e.g. language-undefined)
         const showLang = language && language !== 'undefined' && language !== 'code';
         const langLabel = showLang ? language.charAt(0).toUpperCase() + language.slice(1) : '';
-        
+
         const wrapper = document.createElement('div');
         wrapper.className = 'code-block-wrapper';
-        
+
         const header = document.createElement('div');
         header.className = 'code-block-header';
         header.innerHTML = `
@@ -1090,7 +1472,7 @@ function _addCodeBlockHeaders(container) {
                 <i class="fas fa-copy"></i>
             </button>
         `;
-        
+
         pre.parentNode.insertBefore(wrapper, pre);
         wrapper.appendChild(header);
         wrapper.appendChild(pre);
@@ -2243,8 +2625,8 @@ async function editUserMessage(msgEl) {
             const resp = await fetch('/api/messages/delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    session_id: sessionId, 
+                body: JSON.stringify({
+                    session_id: sessionId,
                     user_seq: parseInt(userSeq),
                     delete_user: true,
                     cascade: true
@@ -2315,8 +2697,8 @@ async function regenerateResponse(botMsgEl) {
             const resp = await fetch('/api/messages/delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    session_id: sessionId, 
+                body: JSON.stringify({
+                    session_id: sessionId,
                     user_seq: parseInt(userSeq),
                     delete_user: true
                 })
@@ -3809,6 +4191,9 @@ function _addOptimisticSessionItem(sid) {
     item.innerHTML = `
         <i class="fas fa-message session-icon"></i>
         <span class="session-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+        <button class="session-rename" onclick="event.stopPropagation(); renameSession('${sid}')" title="${escapeHtml(t('rename_session'))}">
+            <i class="fas fa-pen"></i>
+        </button>
         <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${sid}')" title="Delete">
             <i class="fas fa-trash-can"></i>
         </button>
@@ -3896,6 +4281,9 @@ function _fetchSessionPage(page, clear, onDone) {
                 item.innerHTML = `
                     <i class="fas fa-message session-icon"></i>
                     <span class="session-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+                    <button class="session-rename" onclick="event.stopPropagation(); renameSession('${s.session_id}')" title="${escapeHtml(t('rename_session'))}">
+                        <i class="fas fa-pen"></i>
+                    </button>
                     <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')" title="Delete">
                         <i class="fas fa-trash-can"></i>
                     </button>
@@ -4012,6 +4400,84 @@ function switchSession(newSessionId) {
 
     if (_isMobileView()) closeSessionPanel();
     if (currentView !== 'chat') navigateTo('chat');
+}
+
+// In-place rename a session title: replace the title <span> with an <input>,
+// commit on Enter/blur, cancel on Escape. Persists via PUT /api/sessions/<id>.
+function renameSession(sid) {
+    const item = document.querySelector(`.session-item[data-session-id="${sid}"]`);
+    if (!item) return;
+    const titleEl = item.querySelector('.session-title');
+    if (!titleEl || item.querySelector('.session-title-input')) return;
+
+    const oldTitle = titleEl.textContent;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'session-title-input';
+    input.value = oldTitle;
+    input.maxLength = 100;
+
+    // Avoid switching session while interacting with the input
+    const stop = e => e.stopPropagation();
+    input.addEventListener('click', stop);
+    input.addEventListener('mousedown', stop);
+
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+
+    const restore = (title) => {
+        if (done) return;
+        done = true;
+        const span = document.createElement('span');
+        span.className = 'session-title';
+        span.title = title;
+        span.textContent = title;
+        input.replaceWith(span);
+    };
+
+    const commit = () => {
+        if (done) return;
+        const newTitle = input.value.trim();
+        if (!newTitle || newTitle === oldTitle) {
+            restore(oldTitle);
+            return;
+        }
+        // Optimistically show the new title, then persist.
+        restore(newTitle);
+        fetch(`/api/sessions/${encodeURIComponent(sid)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle })
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'success') {
+                    // Revert UI on failure
+                    const span = item.querySelector('.session-title');
+                    if (span) {
+                        span.title = oldTitle;
+                        span.textContent = oldTitle;
+                    }
+                }
+            })
+            .catch(() => {
+                const span = item.querySelector('.session-title');
+                if (span) {
+                    span.title = oldTitle;
+                    span.textContent = oldTitle;
+                }
+            });
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); restore(oldTitle); }
+    });
+    input.addEventListener('blur', commit);
 }
 
 function deleteSession(sid) {
@@ -4198,7 +4664,6 @@ let configCurrentModel = '';
 let configModelProxyMasked = '';
 let cfgProviderValue = '';
 let cfgModelValue = '';
-let browserConfigState = null;
 let videoParseConfigState = null;
 let weiboParseConfigState = null;
 
@@ -4319,7 +4784,7 @@ function initConfigView(data) {
     if (langSel) {
         initDropdown(
             langSel,
-            [{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }],
+            [{ value: 'zh', label: '简体中文' }, { value: 'zh-Hant', label: '繁體中文' }, { value: 'en', label: 'English' }],
             currentLang,
             (val) => setLanguage(val)
         );
@@ -4492,7 +4957,10 @@ function showStatus(elId, msgKey, isError) {
     el.classList.toggle('text-red-500', !!isError);
     el.classList.toggle('text-primary-500', !isError);
     el.classList.remove('opacity-0');
-    setTimeout(() => el.classList.add('opacity-0'), 2500);
+    // Warning messages (errors) should stay visible, success messages auto-hide
+    if (!isError) {
+        setTimeout(() => el.classList.add('opacity-0'), 2500);
+    }
 }
 
 function showStatusText(elId, message, isError) {
@@ -4624,15 +5092,33 @@ function savePasswordConfig() {
     })
     .then(r => r.json())
     .then(data => {
+        console.log('[Password Config] Response:', data); // Debug
         if (data.status === 'success') {
             if (newPwd) {
                 showStatus('cfg-password-status', 'config_password_changed', false);
-                setTimeout(() => { window.location.reload(); }, 1500);
+                // Mark as masked so user needs to re-enter to change again
+                input.dataset.masked = '1';
+                input.dataset.maskedVal = newPwd;
+                input.value = '••••••••';
+                input.classList.add('cfg-key-masked');
+
+                // Show logout button since password is now enabled
+                const logoutBtn = document.getElementById('logout-btn-header');
+                if (logoutBtn) logoutBtn.classList.remove('hidden');
             } else {
                 input.dataset.masked = '';
                 input.dataset.maskedVal = '';
                 input.classList.remove('cfg-key-masked');
-                showStatus('cfg-password-status', 'config_password_cleared', false);
+
+                // Show security warning if password was cleared with public host
+                if (data.warning === 'password_cleared_with_public_host') {
+                    showStatus('cfg-password-status', 'config_password_security_warning', true);
+                } else {
+                    showStatus('cfg-password-status', 'config_password_cleared', false);
+                }
+
+                const logoutBtn = document.getElementById('logout-btn-header');
+                if (logoutBtn) logoutBtn.classList.add('hidden');
             }
         } else {
             showStatus('cfg-password-status', 'config_save_error', true);
@@ -4704,238 +5190,6 @@ function clearSecretInput(inputId) {
     input.placeholder = input.dataset.placeholder || input.getAttribute('placeholder') || '';
     syncSecretClearButton(input);
     input.focus();
-}
-
-function updateBrowserBackendVisibility(engine) {
-    const value = (engine || getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
-    const camofoxEl = document.getElementById('cfg-browser-camofox');
-    const camoufoxEl = document.getElementById('cfg-browser-camoufox');
-    const playwrightEl = document.getElementById('cfg-browser-playwright');
-    const backendProxyWrap = document.getElementById('cfg-browser-backend-proxy-wrap');
-    const isRest = value === 'camofox' || value === 'auto';
-    if (camofoxEl) camofoxEl.classList.toggle('hidden', !isRest);
-    if (camoufoxEl) camoufoxEl.classList.toggle('hidden', value !== 'camoufox');
-    if (playwrightEl) playwrightEl.classList.toggle('hidden', value !== 'playwright');
-    if (backendProxyWrap) backendProxyWrap.classList.toggle('hidden', !isRest);
-    const startEl = document.getElementById('cfg-browser-start');
-    const stopEl = document.getElementById('cfg-browser-stop');
-    if (startEl) startEl.classList.toggle('hidden', !isRest);
-    if (stopEl) stopEl.classList.toggle('hidden', !isRest);
-}
-
-function initBrowserConfigView(data) {
-    const cfg = (data && data.config) || {};
-    const engine = (cfg.engine || (data && data.public && data.public.engine) || 'playwright').toLowerCase();
-    const engineEl = document.getElementById('cfg-browser-engine');
-    if (!engineEl) return;
-
-    initDropdown(engineEl, [
-        { value: 'playwright', label: 'Playwright' },
-        { value: 'camofox', label: 'Camofox REST' },
-        { value: 'camoufox', label: 'Camoufox' },
-        { value: 'auto', label: currentLang === 'zh' ? '自动' : 'Auto' },
-    ], engine, updateBrowserBackendVisibility);
-    updateBrowserBackendVisibility(engine);
-
-    const enabledEl = document.getElementById('cfg-browser-enabled');
-    if (enabledEl) enabledEl.checked = cfg.enabled !== false;
-
-    const camofox = cfg.camofox || {};
-    const camoufox = cfg.camoufox || {};
-    const playwright = cfg.playwright || {};
-    const health = (data && data.public && data.public.camofox_health) || {};
-    const camoufoxHealth = (data && data.public && data.public.camoufox_health) || {};
-    const healthEl = document.getElementById('cfg-browser-health');
-    if (healthEl) {
-        if (engine === 'camofox' || engine === 'auto') {
-            healthEl.textContent = health.ok ? t('config_browser_ok') : t('config_browser_failed');
-            healthEl.classList.toggle('text-primary-500', !!health.ok);
-            healthEl.classList.toggle('text-red-500', !health.ok);
-            healthEl.classList.toggle('text-slate-400', false);
-            healthEl.classList.toggle('dark:text-slate-500', false);
-        } else if (engine === 'camoufox') {
-            healthEl.textContent = camoufoxHealth.ok ? t('config_browser_ok') : t('config_browser_failed');
-            healthEl.classList.toggle('text-primary-500', !!camoufoxHealth.ok);
-            healthEl.classList.toggle('text-red-500', !camoufoxHealth.ok);
-            healthEl.classList.toggle('text-slate-400', false);
-            healthEl.classList.toggle('dark:text-slate-500', false);
-        } else {
-            healthEl.textContent = currentLang === 'zh' ? 'Playwright' : 'Playwright';
-            healthEl.classList.remove('text-primary-500', 'text-red-500');
-            healthEl.classList.add('text-slate-400', 'dark:text-slate-500');
-        }
-    }
-
-    const baseEl = document.getElementById('cfg-camofox-base-url');
-    if (baseEl) baseEl.value = camofox.base_url || 'http://127.0.0.1:9377';
-    initSecretInput(document.getElementById('cfg-camofox-access-key'), camofox.access_key_masked || '');
-    initSecretInput(document.getElementById('cfg-camofox-admin-key'), camofox.admin_key_masked || '');
-    const portEl = document.getElementById('cfg-camofox-port');
-    if (portEl) portEl.value = camofox.port || 9377;
-    const managedEl = document.getElementById('cfg-camofox-managed');
-    if (managedEl) managedEl.checked = camofox.managed === true;
-    const autoStartEl = document.getElementById('cfg-camofox-auto-start');
-    if (autoStartEl) autoStartEl.checked = camofox.auto_start === true;
-    initSecretInput(document.getElementById('cfg-browser-backend-proxy'), cfg.backend_proxy_masked || '');
-
-    const camoufoxUserDataEl = document.getElementById('cfg-camoufox-user-data');
-    if (camoufoxUserDataEl) camoufoxUserDataEl.value = camoufox.user_data_dir || '~/.cow/camoufox_profile';
-    initSecretInput(document.getElementById('cfg-camoufox-proxy'), camoufox.proxy_masked || '');
-    const proxyDefaultEl = document.getElementById('cfg-browser-proxy-default');
-    if (proxyDefaultEl) proxyDefaultEl.checked = cfg.proxy_default === true;
-    const camoufoxIdleTimeoutEl = document.getElementById('cfg-camoufox-idle-timeout');
-    if (camoufoxIdleTimeoutEl) camoufoxIdleTimeoutEl.value = camoufox.idle_timeout == null ? 10 : camoufox.idle_timeout;
-    const osEl = document.getElementById('cfg-camoufox-os');
-    if (osEl) {
-        initDropdown(osEl, [
-            { value: '', label: t('config_browser_camoufox_auto_os') },
-            { value: 'windows', label: 'Windows' },
-            { value: 'macos', label: 'macOS' },
-            { value: 'linux', label: 'Linux' },
-        ], camoufox.os || '', null);
-    }
-    const persistentEl = document.getElementById('cfg-camoufox-persistent');
-    if (persistentEl) persistentEl.checked = camoufox.persistent !== false;
-    const humanizeEl = document.getElementById('cfg-camoufox-humanize');
-    if (humanizeEl) humanizeEl.checked = camoufox.humanize !== false;
-    const geoipEl = document.getElementById('cfg-camoufox-geoip');
-    if (geoipEl) geoipEl.checked = camoufox.geoip === true;
-    const presetEl = document.getElementById('cfg-camoufox-fingerprint-preset');
-    if (presetEl) presetEl.checked = camoufox.fingerprint_preset === true;
-
-    const cdpEl = document.getElementById('cfg-playwright-cdp');
-    if (cdpEl) cdpEl.value = playwright.cdp_endpoint || '';
-    const userDataEl = document.getElementById('cfg-playwright-user-data');
-    if (userDataEl) userDataEl.value = playwright.user_data_dir || '~/.cow/browser_profile';
-}
-
-function collectBrowserConfigPayload() {
-    const engine = (getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
-    const camoufoxIdleRaw = document.getElementById('cfg-camoufox-idle-timeout')?.value;
-    const camoufoxIdleParsed = parseInt(camoufoxIdleRaw == null || camoufoxIdleRaw === '' ? '10' : camoufoxIdleRaw, 10);
-    const payload = {
-        enabled: document.getElementById('cfg-browser-enabled')?.checked !== false,
-        engine,
-        proxy_default: document.getElementById('cfg-browser-proxy-default')?.checked === true,
-        playwright: {
-            cdp_endpoint: document.getElementById('cfg-playwright-cdp')?.value.trim() || '',
-            user_data_dir: document.getElementById('cfg-playwright-user-data')?.value.trim() || '~/.cow/browser_profile',
-        },
-        camofox: {
-            base_url: document.getElementById('cfg-camofox-base-url')?.value.trim() || 'http://127.0.0.1:9377',
-            port: parseInt(document.getElementById('cfg-camofox-port')?.value || '9377') || 9377,
-            managed: document.getElementById('cfg-camofox-managed')?.checked === true,
-            auto_start: document.getElementById('cfg-camofox-auto-start')?.checked === true,
-        },
-        camoufox: {
-            persistent: document.getElementById('cfg-camoufox-persistent')?.checked !== false,
-            user_data_dir: document.getElementById('cfg-camoufox-user-data')?.value.trim() || '~/.cow/camoufox_profile',
-            humanize: document.getElementById('cfg-camoufox-humanize')?.checked !== false,
-            geoip: document.getElementById('cfg-camoufox-geoip')?.checked === true,
-            fingerprint_preset: document.getElementById('cfg-camoufox-fingerprint-preset')?.checked === true,
-            os: getDropdownValue(document.getElementById('cfg-camoufox-os')) || '',
-            idle_timeout: Math.max(0, Number.isFinite(camoufoxIdleParsed) ? camoufoxIdleParsed : 10),
-        },
-    };
-    const backendProxyEl = document.getElementById('cfg-browser-backend-proxy');
-    if (backendProxyEl && backendProxyEl.dataset.masked !== '1') {
-        payload.backend_proxy = backendProxyEl.value.trim();
-    }
-    const accessKeyEl = document.getElementById('cfg-camofox-access-key');
-    if (accessKeyEl && accessKeyEl.dataset.masked !== '1') {
-        payload.camofox.access_key = accessKeyEl.value.trim();
-    }
-    const adminKeyEl = document.getElementById('cfg-camofox-admin-key');
-    if (adminKeyEl && adminKeyEl.dataset.masked !== '1') {
-        payload.camofox.admin_key = adminKeyEl.value.trim();
-    }
-    const camoufoxProxyEl = document.getElementById('cfg-camoufox-proxy');
-    if (camoufoxProxyEl && camoufoxProxyEl.dataset.masked !== '1') {
-        payload.camoufox.proxy = camoufoxProxyEl.value.trim();
-    }
-    return payload;
-}
-
-function loadBrowserConfig() {
-    fetch('/api/browser').then(r => r.json()).then(data => {
-        if (data.status !== 'success') return;
-        browserConfigState = data;
-        initBrowserConfigView(data);
-    }).catch(() => {});
-}
-
-function saveBrowserConfig() {
-    const btn = document.getElementById('cfg-browser-save');
-    if (btn) btn.disabled = true;
-    fetch('/api/browser', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', config: collectBrowserConfigPayload() })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'success') {
-            showStatus('cfg-browser-status', 'config_saved', false);
-            loadBrowserConfig();
-        } else {
-            showStatusText('cfg-browser-status', data.message || t('config_save_error'), true);
-        }
-    })
-    .catch(() => showStatus('cfg-browser-status', 'config_save_error', true))
-    .finally(() => { if (btn) btn.disabled = false; });
-}
-
-function testBrowserConfig() {
-    const btn = document.getElementById('cfg-browser-test');
-    if (btn) btn.disabled = true;
-    fetch('/api/browser', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'test', config: collectBrowserConfigPayload() })
-    })
-    .then(r => r.json())
-    .then(data => {
-        const engine = (getDropdownValue(document.getElementById('cfg-browser-engine')) || 'playwright').toLowerCase();
-        const health = data.health || {};
-        const ok = data.status === 'success' && (
-            health.ok || (engine === 'auto' && health.fallback_playwright_available)
-        );
-        showStatus('cfg-browser-status', ok ? 'config_browser_ok' : 'config_browser_failed', !ok);
-        const healthEl = document.getElementById('cfg-browser-health');
-        if (healthEl) {
-            healthEl.textContent = ok ? t('config_browser_ok') : t('config_browser_failed');
-            healthEl.classList.toggle('text-primary-500', ok);
-            healthEl.classList.toggle('text-red-500', !ok);
-        }
-    })
-    .catch(() => showStatus('cfg-browser-status', 'config_browser_failed', true))
-    .finally(() => { if (btn) btn.disabled = false; });
-}
-
-function runBrowserLifecycleAction(action, buttonId) {
-    const btn = document.getElementById(buttonId);
-    if (btn) btn.disabled = true;
-    fetch('/api/browser', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, config: collectBrowserConfigPayload() })
-    })
-    .then(r => r.json())
-    .then(data => {
-        const ok = data.status === 'success';
-        showStatus('cfg-browser-status', ok ? 'config_browser_ok' : 'config_browser_failed', !ok);
-        loadBrowserConfig();
-    })
-    .catch(() => showStatus('cfg-browser-status', 'config_browser_failed', true))
-    .finally(() => { if (btn) btn.disabled = false; });
-}
-
-function startBrowserBackend() {
-    runBrowserLifecycleAction('start', 'cfg-browser-start');
-}
-
-function stopBrowserBackend() {
-    runBrowserLifecycleAction('stop', 'cfg-browser-stop');
 }
 
 function videoParseKeySourceLabel(source) {
@@ -5321,7 +5575,6 @@ function loadConfigView() {
         if (data.status !== 'success') return;
         appConfig = data;
         initConfigView(data);
-        loadBrowserConfig();
         loadVideoParseConfig();
         loadWeiboParseConfig();
     }).catch(() => {});
@@ -6369,8 +6622,10 @@ function renderCapabilityBody(def, cap, body) {
 
     if (def.needsModel) {
         rebuildCapabilityModelDropdown(def, initialProviderValue, cap.current_model || '', body);
-        // Hide model picker in auto mode — fallback hint below covers it.
-        setCapabilityModelPickerVisible(def, initialProviderValue !== '' || !capabilitySupportsAuto(def.id), body);
+        // Embedding: hide model picker when no provider is selected.
+        const showModel = def.id === 'embedding' ? initialProviderValue !== '' :
+            (initialProviderValue !== '' || !capabilitySupportsAuto(def.id));
+        setCapabilityModelPickerVisible(def, showModel, body);
     }
 
     if (def.id === 'tts') {
@@ -6427,7 +6682,7 @@ function renderEmbeddingProviderConfig(body, cap) {
             <p class="text-sm font-medium text-slate-700 dark:text-slate-200">${t('models_embedding_custom_title')}</p>
             <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">${t('models_embedding_custom_hint')}</p>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div id="cap-embedding-credentials" class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${t('models_embedding_api_base')}</label>
                 <input id="cap-embedding-api-base" type="text" autocomplete="off" spellcheck="false"
@@ -6907,9 +7162,12 @@ function updateEmbeddingProviderConfig(providerId, scope) {
     if (!providerId) return;
 
     const baseInput = root.querySelector('#cap-embedding-api-base');
+    const credentials = root.querySelector('#cap-embedding-credentials');
     const dimInput = root.querySelector('#cap-embedding-dimensions');
     const hint = root.querySelector('#cap-embedding-proxy-hint');
     const cap = modelsState.capabilities.embedding || {};
+
+    if (credentials) credentials.classList.toggle('hidden', providerId.startsWith('custom:'));
 
     if (baseInput && !baseInput.value) {
         if (providerId === 'gemini') baseInput.placeholder = 'https://generativelanguage.googleapis.com';
@@ -7204,6 +7462,9 @@ function rebuildCapabilityModelDropdown(def, providerId, selectedModel, scope) {
     let rawList;
     if (capModelMap[providerId]) {
         rawList = capModelMap[providerId].slice();
+    } else if (providerId.startsWith('custom:') && capModelMap['custom']) {
+        // Expanded custom:<id> entries share the same preset model list
+        rawList = capModelMap['custom'].slice();
     } else {
         const provider = modelsState.providers.find(p => p.id === providerId);
         rawList = (provider && provider.models) ? provider.models.slice() : [];
@@ -7337,10 +7598,12 @@ function onCapabilityProviderChange(def, providerId, scope) {
         // Empty sentinel hides the model picker (capability is in auto mode).
         const isAuto = providerId === '' && capabilitySupportsAuto(def.id);
         const useInstanceModel = def.id === 'asr' && providerId === 'openai';
-        if (!isAuto && !useInstanceModel) {
+        const embeddingCleared = def.id === 'embedding' && providerId === '';
+        const showModel = !isAuto && !useInstanceModel && !embeddingCleared;
+        if (showModel) {
             rebuildCapabilityModelDropdown(def, providerId, '', scope);
         }
-        setCapabilityModelPickerVisible(def, !isAuto && !useInstanceModel, scope);
+        setCapabilityModelPickerVisible(def, showModel, scope);
     }
     if (def.id === 'tts') {
         rebuildCapabilityVoiceDropdown(providerId, '', scope);
@@ -7413,9 +7676,11 @@ function getEmbeddingProviderPayload(provider) {
     const dimInput = document.getElementById('cap-embedding-dimensions');
     const proxyInput = document.getElementById('cap-embedding-proxy');
 
-    if (baseInput) payload.embedding_api_base = baseInput.value.trim();
+    if (baseInput && !provider.startsWith('custom:')) {
+        payload.embedding_api_base = baseInput.value.trim();
+    }
     if (dimInput) payload.embedding_dimensions = dimInput.value.trim();
-    if (keyInput && keyInput.dataset.masked !== '1') {
+    if (!provider.startsWith('custom:') && keyInput && keyInput.dataset.masked !== '1') {
         const value = keyInput.value.trim();
         if (value) {
             payload.embedding_api_key = value;
@@ -7440,7 +7705,8 @@ function saveCapability(capId) {
     // hidden and any value left in it is stale; persist an empty model so
     // the backend treats this as "fall back to the runtime chain".
     const isAuto = provider === '' && capabilitySupportsAuto(capId);
-    let model = isAuto ? '' : getCapabilityModelValue(def);
+    let model = (isAuto || (capId === 'embedding' && !provider))
+        ? '' : getCapabilityModelValue(def);
     if (capId === 'asr' && provider === 'openai') {
         model = '';
     }
@@ -8913,6 +9179,26 @@ function connectFeishuAfterRegister(appId, appSecret) {
 // Scheduler View
 // =====================================================================
 let tasksLoaded = false;
+function refreshTasksView() {
+    const btn = document.getElementById('task-refresh-btn');
+    const icon = btn.querySelector('i');
+
+    // Add spin animation
+    icon.classList.add('fa-spin');
+    btn.disabled = true;
+
+    tasksLoaded = false;
+    const listEl = document.getElementById('tasks-list');
+    listEl.innerHTML = '';
+
+    loadTasksView();
+
+    // Restore button after animation ends
+    setTimeout(() => {
+        icon.classList.remove('fa-spin');
+        btn.disabled = false;
+    }, 500);
+}
 function loadTasksView() {
     if (tasksLoaded) return;
     fetch('/api/scheduler').then(r => r.json()).then(data => {
@@ -8920,39 +9206,94 @@ function loadTasksView() {
         const emptyEl = document.getElementById('tasks-empty');
         const listEl = document.getElementById('tasks-list');
         const allTasks = data.tasks || [];
-        // Only show active (enabled) tasks
-        const tasks = allTasks.filter(t => t.enabled !== false);
-        if (tasks.length === 0) {
+        // Backend already sorted by enabled and next_run_at, no need to re-sort on frontend
+        if (allTasks.length === 0) {
             emptyEl.querySelector('p').textContent = currentLang === 'zh' ? '暂无定时任务' : 'No scheduled tasks';
+            emptyEl.classList.remove('hidden');
+            listEl.classList.add('hidden');
+            tasksLoaded = true;
             return;
         }
         emptyEl.classList.add('hidden');
         listEl.classList.remove('hidden');
         listEl.innerHTML = '';
 
-        tasks.forEach(task => {
+        allTasks.forEach(task => {
+            const isEnabled = task.enabled !== false;
             const card = document.createElement('div');
             card.className = 'bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10 p-4';
-            const typeLabel = task.type === 'cron'
-                ? `<span class="text-xs font-mono text-slate-400">${escapeHtml(task.cron || '')}</span>`
-                : `<span class="text-xs text-slate-400">${escapeHtml(task.type || 'once')}</span>`;
+            card.dataset.taskId = task.id;
+            if (!isEnabled) card.classList.add('opacity-50');
+            const schedule = task.schedule || {};
+            let typeLabel = '';
+            if (schedule.type === 'cron') {
+                typeLabel = `<span class="text-xs font-mono text-slate-400">${escapeHtml(schedule.expression || '')}</span>`;
+            } else if (schedule.type === 'interval') {
+                const seconds = schedule.seconds || 0;
+                const hours = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                let intervalText = [];
+                if (hours > 0) intervalText.push(`${hours}h`);
+                if (mins > 0) intervalText.push(`${mins}m`);
+                if (secs > 0 || intervalText.length === 0) intervalText.push(`${secs}s`);
+                typeLabel = `<span class="text-xs text-slate-400">${intervalText.join(' ')}</span>`;
+            } else {
+                typeLabel = `<span class="text-xs text-slate-400">${escapeHtml(schedule.type || 'once')}</span>`;
+            }
             let nextRun = '--';
             if (task.next_run_at) {
-                // next_run_at is an ISO string, not a Unix timestamp
                 const d = new Date(task.next_run_at);
                 if (!isNaN(d.getTime())) nextRun = d.toLocaleString();
             }
+            const action = task.action || {};
+            const taskContent = action.content || action.task_description || '';
+            const toggleId = 'toggle-' + task.id;
             card.innerHTML = `
                 <div class="flex items-center gap-2 mb-2">
-                    <span class="w-2 h-2 rounded-full bg-primary-400"></span>
+                    <span class="w-2 h-2 rounded-full ${isEnabled ? 'bg-primary-400' : 'bg-slate-300 dark:bg-slate-600'}"></span>
                     <span class="font-medium text-sm text-slate-700 dark:text-slate-200">${escapeHtml(task.name || task.id || '--')}</span>
                     <div class="flex-1"></div>
                     ${typeLabel}
                 </div>
-                <p class="text-xs text-slate-500 dark:text-slate-400 mb-2 line-clamp-2">${escapeHtml(task.prompt || task.description || '')}</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mb-2 line-clamp-2">${escapeHtml(taskContent)}</p>
                 <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
                     <span><i class="fas fa-clock mr-1"></i>${currentLang === 'zh' ? '下次执行' : 'Next run'}: ${nextRun}</span>
+                    <div class="flex-1"></div>
+                    <label class="relative inline-flex items-center cursor-pointer" for="${toggleId}">
+                        <input type="checkbox" id="${toggleId}" class="sr-only peer" ${isEnabled ? 'checked' : ''}>
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-500 dark:bg-slate-600 dark:peer-checked:bg-primary-500"></div>
+                    </label>
                 </div>`;
+            const checkbox = card.querySelector('#' + toggleId);
+            checkbox.addEventListener('change', function() {
+                const newEnabled = this.checked;
+                fetch('/api/scheduler/toggle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_id: task.id, enabled: newEnabled})
+                }).then(r => r.json()).then(res => {
+                    if (res.status === 'success') {
+                        const dot = card.querySelector('.rounded-full.w-2');
+                        if (newEnabled) {
+                            card.classList.remove('opacity-50');
+                            if (dot) { dot.classList.remove('bg-slate-300','dark:bg-slate-600'); dot.classList.add('bg-primary-400'); }
+                        } else {
+                            card.classList.add('opacity-50');
+                            if (dot) { dot.classList.remove('bg-primary-400'); dot.classList.add('bg-slate-300','dark:bg-slate-600'); }
+                        }
+                    } else {
+                        this.checked = !newEnabled;
+                    }
+                }).catch(() => { this.checked = !newEnabled; });
+            });
+            // Card click event (excluding toggle switch clicks)
+            card.addEventListener('click', function(e) {
+                if (!e.target.closest('label') && !e.target.closest('input[type="checkbox"]')) {
+                    openTaskEditModal(task);
+                }
+            });
+            card.style.cursor = 'pointer';
             listEl.appendChild(card);
         });
         tasksLoaded = true;
@@ -9075,8 +9416,11 @@ let _knowledgeTreeData = [];
 let _knowledgeRootFiles = [];
 let _knowledgeCurrentFile = null;
 let _knowledgeGraphLoaded = false;
+const KNOWLEDGE_IMPORT_MAX_FILES = 100;
+const KNOWLEDGE_IMPORT_MAX_FILE_SIZE = 10 * 1024 * 1024;
+const KNOWLEDGE_IMPORT_MAX_TOTAL_SIZE = 200 * 1024 * 1024;
 
-function loadKnowledgeView() {
+function loadKnowledgeView(targetPath) {
     // Reset to docs tab
     switchKnowledgeTab('docs');
     _knowledgeGraphLoaded = false;
@@ -9084,6 +9428,7 @@ function loadKnowledgeView() {
 
     fetch('/api/knowledge/list').then(r => r.json()).then(data => {
         if (data.status !== 'success') return;
+        initKnowledgeImportDropZone();
 
         const emptyEl = document.getElementById('knowledge-empty');
         const docsPanel = document.getElementById('knowledge-panel-docs');
@@ -9099,7 +9444,7 @@ function loadKnowledgeView() {
 
         statsEl.textContent = totalPages + ' pages · ' + sizeStr;
 
-        if (totalPages === 0) {
+        if (totalPages === 0 && tree.length === 0 && rootFiles.length === 0) {
             emptyEl.querySelector('p').textContent = t('knowledge_empty_hint');
             const guideEl = document.getElementById('knowledge-empty-guide');
             if (guideEl) guideEl.classList.remove('hidden');
@@ -9111,6 +9456,15 @@ function loadKnowledgeView() {
         docsPanel.classList.remove('hidden');
 
         renderKnowledgeTree(tree, rootFiles);
+
+        // Prefer opening the just created/imported file; ensure its group is
+        // expanded so the active item is visible in the tree.
+        const targetTitle = targetPath ? _findKnowledgeFileTitle(targetPath) : null;
+        if (targetTitle !== null) {
+            _expandKnowledgeGroupFor(targetPath);
+            openKnowledgeFile(targetPath, targetTitle);
+            return;
+        }
 
         // Auto-select the first file (desktop only)
         if (window.innerWidth >= 768) {
@@ -9129,6 +9483,36 @@ function loadKnowledgeView() {
     }).catch(() => {});
 }
 
+// Find a file's display title by its relative path within the knowledge tree.
+// Returns the title, or null when the path is not present.
+function _findKnowledgeFileTitle(path) {
+    if (!path) return null;
+    const rootHit = (_knowledgeRootFiles || []).find(f => f.name === path);
+    if (rootHit) return rootHit.title || rootHit.name;
+    const walk = (groups, parentPath) => {
+        for (const group of groups || []) {
+            const groupPath = parentPath ? `${parentPath}/${group.dir}` : group.dir;
+            const hit = (group.files || []).find(f => `${groupPath}/${f.name}` === path);
+            if (hit) return hit.title || hit.name;
+            const childHit = walk(group.children, groupPath);
+            if (childHit !== null) return childHit;
+        }
+        return null;
+    };
+    return walk(_knowledgeTreeData, '');
+}
+
+// Open every ancestor group of the given file path so it is visible.
+function _expandKnowledgeGroupFor(path) {
+    if (!path || !path.includes('/')) return;
+    const target = document.querySelector(`.knowledge-tree-file[data-path="${CSS.escape(path)}"]`);
+    let node = target ? target.closest('.knowledge-tree-group') : null;
+    while (node) {
+        node.classList.add('open');
+        node = node.parentElement ? node.parentElement.closest('.knowledge-tree-group') : null;
+    }
+}
+
 function renderKnowledgeTree(tree, rootFilesOrFilter, filter) {
     const container = document.getElementById('knowledge-tree');
     container.innerHTML = '';
@@ -9145,7 +9529,7 @@ function renderKnowledgeTree(tree, rootFilesOrFilter, filter) {
         const fbtn = document.createElement('button');
         fbtn.className = 'knowledge-tree-file' + (_knowledgeCurrentFile === f.name ? ' active' : '');
         fbtn.dataset.path = f.name;
-        fbtn.innerHTML = `<i class="fas fa-file-lines text-[10px] text-slate-400"></i><span class="truncate">${escapeHtml(f.title)}</span>`;
+        fbtn.innerHTML = `<i class="fas fa-file-lines text-[10px] text-slate-400"></i><span class="truncate">${escapeHtml(f.title)}</span>${_knowledgeFileActions(f.name)}`;
         fbtn.onclick = () => openKnowledgeFile(f.name, f.title);
         container.appendChild(fbtn);
     });
@@ -9170,7 +9554,7 @@ function _renderKnowledgeGroups(container, groups, parentPath, lowerFilter, dept
         const btn = document.createElement('button');
         btn.className = 'knowledge-tree-group-btn';
         btn.style.paddingLeft = (8 + indent) + 'px';
-        btn.innerHTML = `<i class="fas fa-chevron-right chevron"></i><i class="fas fa-folder text-amber-400 text-[11px]"></i><span>${escapeHtml(group.dir)}</span><span class="ml-auto text-[10px] text-slate-400">${fileCount}</span>`;
+        btn.innerHTML = `<i class="fas fa-chevron-right chevron"></i><i class="fas fa-folder text-amber-400 text-[11px]"></i><span>${escapeHtml(group.dir)}</span><span class="ml-auto text-[10px] text-slate-400">${fileCount}</span>${_knowledgeCategoryActions(groupPath)}`;
         btn.onclick = () => div.classList.toggle('open');
         div.appendChild(btn);
 
@@ -9182,7 +9566,7 @@ function _renderKnowledgeGroups(container, groups, parentPath, lowerFilter, dept
             fbtn.className = 'knowledge-tree-file' + (_knowledgeCurrentFile === fpath ? ' active' : '');
             fbtn.dataset.path = fpath;
             fbtn.style.paddingLeft = (24 + indent) + 'px';
-            fbtn.innerHTML = `<i class="fas fa-file-lines text-[10px] text-slate-400"></i><span class="truncate">${escapeHtml(f.title)}</span>`;
+            fbtn.innerHTML = `<i class="fas fa-file-lines text-[10px] text-slate-400"></i><span class="truncate">${escapeHtml(f.title)}</span>${_knowledgeFileActions(fpath)}`;
             fbtn.onclick = () => openKnowledgeFile(fpath, f.title);
             items.appendChild(fbtn);
         });
@@ -9191,6 +9575,409 @@ function _renderKnowledgeGroups(container, groups, parentPath, lowerFilter, dept
         }
         div.appendChild(items);
         container.appendChild(div);
+    });
+}
+
+function _knowledgeActionButton(icon, title, handler) {
+    const danger = icon === 'fa-trash' ? ' danger' : '';
+    return `<span role="button" tabindex="0" title="${escapeHtml(title)}" onclick="event.stopPropagation();${handler}" class="knowledge-action${danger}"><i class="fas ${icon}"></i></span>`;
+}
+
+function _knowledgeFileActions(path) {
+    if (path === 'index.md' || path === 'log.md') return '';
+    const value = JSON.stringify(path).replace(/"/g, '&quot;');
+    return `<span class="knowledge-actions">${_knowledgeActionButton('fa-arrow-right-arrow-left', '移动', `moveKnowledgeDocument(${value})`)}${_knowledgeActionButton('fa-trash', '删除', `deleteKnowledgeDocument(${value})`)}</span>`;
+}
+
+function _knowledgeCategoryActions(path) {
+    const value = JSON.stringify(path).replace(/"/g, '&quot;');
+    return `<span class="knowledge-actions">${_knowledgeActionButton('fa-pen', '重命名', `renameKnowledgeCategory(${value})`)}${_knowledgeActionButton('fa-trash', '删除', `deleteKnowledgeCategory(${value})`)}</span>`;
+}
+
+async function dispatchKnowledgeAction(action, payload, openPathResolver) {
+    _setKnowledgeStatus(currentLang === 'zh' ? '处理中...' : 'Working...', false, true);
+    try {
+        const response = await fetch('/api/knowledge/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action, payload}),
+        });
+        const result = await response.json();
+        if (result.status !== 'success') {
+            _setKnowledgeStatus(result.message || (currentLang === 'zh' ? '操作失败' : 'Operation failed'), true);
+            loadKnowledgeView();
+            return null;
+        }
+        _setKnowledgeStatus(_knowledgeResultMessage(action, result.payload), false);
+        // Optionally auto-open the affected file after the tree refreshes.
+        const openPath = openPathResolver ? openPathResolver(result.payload) : null;
+        loadKnowledgeView(openPath || undefined);
+        return result.payload;
+    } catch (error) {
+        _setKnowledgeStatus(currentLang === 'zh' ? '请求失败，请稍后重试' : 'Request failed, please try again', true);
+        return null;
+    }
+}
+
+function _setKnowledgeStatus(message, isError, persistent) {
+    const el = document.getElementById('knowledge-action-status');
+    el.textContent = message;
+    el.className = `text-xs transition-opacity duration-200 ${isError ? 'text-red-500' : 'text-primary-500'}`;
+    el.classList.remove('opacity-0');
+    clearTimeout(el._hideTimer);
+    if (!persistent) el._hideTimer = setTimeout(() => el.classList.add('opacity-0'), 3500);
+}
+
+function _knowledgeResultMessage(action, payload) {
+    if (currentLang !== 'zh') {
+        return action === 'create_category' ? 'Category created' :
+            action === 'create_document' ? 'Document created' :
+            action === 'rename_category' ? 'Category renamed' :
+            action === 'delete_category' ? 'Category deleted' :
+            action === 'import_documents' ? `${payload?.imported || 0} imported · ${payload?.skipped || 0} skipped · ${payload?.failed || 0} failed` :
+            action === 'move_documents' ? `${payload?.moved || 0} document moved` :
+            `${payload?.deleted || 0} document deleted`;
+    }
+    return action === 'create_category' ? '分类已创建' :
+        action === 'create_document' ? '文档已创建' :
+        action === 'rename_category' ? '分类已重命名' :
+        action === 'delete_category' ? '分类已删除' :
+        action === 'import_documents' ? `导入 ${payload?.imported || 0} 个，跳过 ${payload?.skipped || 0} 个，失败 ${payload?.failed || 0} 个` :
+        action === 'move_documents' ? `已移动 ${payload?.moved || 0} 个文档` :
+        `已删除 ${payload?.deleted || 0} 个文档`;
+}
+
+function _knowledgeCategoryPaths(groups, parent = '') {
+    const paths = [];
+    for (const group of groups || []) {
+        const path = parent ? `${parent}/${group.dir}` : group.dir;
+        paths.push(path, ..._knowledgeCategoryPaths(group.children || [], path));
+    }
+    return paths;
+}
+
+function openKnowledgeDialog(options) {
+    const overlay = document.getElementById('knowledge-dialog-overlay');
+    const card = document.getElementById('knowledge-dialog-card');
+    const input = document.getElementById('knowledge-dialog-input');
+    const select = document.getElementById('knowledge-dialog-select');
+    const textarea = document.getElementById('knowledge-dialog-textarea');
+    const documentForm = document.getElementById('knowledge-document-form');
+    const documentFilename = document.getElementById('knowledge-document-filename');
+    const documentContent = document.getElementById('knowledge-document-content');
+    const templateBtn = document.getElementById('knowledge-document-template');
+    const documentPathPreview = document.getElementById('knowledge-document-path-preview');
+    const submit = document.getElementById('knowledge-dialog-submit');
+    const cancel = document.getElementById('knowledge-dialog-cancel');
+    document.getElementById('knowledge-dialog-title').textContent = options.title;
+    document.getElementById('knowledge-dialog-subtitle').textContent = options.subtitle || '';
+    document.getElementById('knowledge-dialog-label').textContent = options.label;
+    document.getElementById('knowledge-dialog-hint').textContent = options.hint || '';
+    document.getElementById('knowledge-dialog-error').classList.add('hidden');
+    document.getElementById('knowledge-dialog-icon').className = `fas ${options.icon || 'fa-folder'} text-emerald-500`;
+    card.classList.toggle('knowledge-document-dialog', options.type === 'document');
+    input.classList.toggle('hidden', options.type === 'select' || options.type === 'textarea' || options.type === 'document');
+    select.classList.toggle('hidden', options.type !== 'select');
+    textarea.classList.toggle('hidden', options.type !== 'textarea');
+    documentForm.classList.toggle('hidden', options.type !== 'document');
+    input.value = options.value || '';
+    textarea.value = options.value || '';
+    documentFilename.value = options.filename || '';
+    documentContent.value = options.content || '';
+    document.getElementById('knowledge-document-category-label').textContent = currentLang === 'zh' ? '目标分类' : 'Destination category';
+    documentPathPreview.textContent = options.category
+        ? `knowledge/${options.category}/`
+        : 'knowledge/';
+    documentFilename.oninput = null;
+    document.getElementById('knowledge-document-filename-label').textContent = currentLang === 'zh' ? '文件名' : 'Filename';
+    document.getElementById('knowledge-document-content-label').textContent = currentLang === 'zh' ? 'Markdown 内容' : 'Markdown content';
+    templateBtn.textContent = currentLang === 'zh' ? '插入模板' : 'Insert template';
+    templateBtn.onclick = () => {
+        if (documentContent.value.trim()) return;
+        const title = (documentFilename.value || 'untitled').replace(/\.md$/i, '');
+        documentContent.value = currentLang === 'zh'
+            ? `# ${title}\n\n## 摘要\n\n\n## 关键点\n\n- \n\n## 参考\n\n`
+            : `# ${title}\n\n## Summary\n\n\n## Key points\n\n- \n\n## References\n\n`;
+        documentContent.focus();
+    };
+    if (options.type === 'select') {
+        // Use the shared custom dropdown component instead of a native
+        // <select> so the arrow / menu match the rest of the console.
+        const ddOptions = (options.choices || []).map(value => ({ value, label: value }));
+        initDropdown(select, ddOptions, (options.choices || [])[0] || '', null);
+    }
+    submit.textContent = currentLang === 'zh' ? '确定' : 'Confirm';
+    cancel.textContent = currentLang === 'zh' ? '取消' : 'Cancel';
+    submit.disabled = options.type === 'select' && !(options.choices || []).length;
+
+    const close = () => overlay.classList.add('hidden');
+    const submitAction = async () => {
+        const rawValue = options.type === 'select' ? getDropdownValue(select) :
+            (options.type === 'textarea' ? textarea.value :
+            (options.type === 'document' ? {
+                filename: documentFilename.value.trim(),
+                content: documentContent.value,
+            } : input.value));
+        const value = options.type === 'textarea' || options.type === 'document' ? rawValue : rawValue.trim();
+        const error = options.validate ? options.validate(value) : (!value ? (currentLang === 'zh' ? '此项不能为空' : 'This field is required') : '');
+        if (error) {
+            const errorEl = document.getElementById('knowledge-dialog-error');
+            errorEl.textContent = error;
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        submit.disabled = true;
+        const ok = await options.onSubmit(value);
+        submit.disabled = false;
+        if (ok !== null) close();
+    };
+    submit.onclick = submitAction;
+    cancel.onclick = close;
+    overlay.onclick = event => { if (event.target === overlay) close(); };
+    input.onkeydown = event => { if (event.key === 'Enter') submitAction(); };
+    overlay.classList.remove('hidden');
+    setTimeout(() => (options.type === 'select' ? select : (options.type === 'textarea' ? textarea : (options.type === 'document' ? documentFilename : input))).focus(), 0);
+}
+
+function closeKnowledgeNewMenu() {
+    const list = document.getElementById('knowledge-new-menu-list');
+    if (list) list.classList.add('hidden');
+    document.removeEventListener('click', _knowledgeNewMenuOutside, true);
+}
+
+function _knowledgeNewMenuOutside(event) {
+    const menu = document.getElementById('knowledge-new-menu');
+    if (menu && !menu.contains(event.target)) closeKnowledgeNewMenu();
+}
+
+function toggleKnowledgeNewMenu(event) {
+    if (event) event.stopPropagation();
+    const list = document.getElementById('knowledge-new-menu-list');
+    if (!list) return;
+    const willOpen = list.classList.contains('hidden');
+    list.classList.toggle('hidden');
+    if (willOpen) {
+        document.addEventListener('click', _knowledgeNewMenuOutside, true);
+    } else {
+        document.removeEventListener('click', _knowledgeNewMenuOutside, true);
+    }
+}
+
+function createKnowledgeCategory() {
+    openKnowledgeDialog({
+        title: currentLang === 'zh' ? '新建分类' : 'New category',
+        subtitle: currentLang === 'zh' ? '分类会创建为 knowledge/ 下的目录' : 'Creates a directory under knowledge/',
+        label: currentLang === 'zh' ? '分类路径' : 'Category path',
+        hint: currentLang === 'zh' ? '支持嵌套路径，例如 research/ai' : 'Nested paths are supported, e.g. research/ai',
+        icon: 'fa-folder-plus',
+        onSubmit: path => dispatchKnowledgeAction('create_category', {path}),
+    });
+}
+
+function createKnowledgeDocument() {
+    const categories = _knowledgeCategoryPaths(_knowledgeTreeData);
+    if (!categories.length) {
+        _setKnowledgeStatus(currentLang === 'zh' ? '请先创建分类' : 'Create a category first', true);
+        return;
+    }
+    openKnowledgeDialog({
+        title: currentLang === 'zh' ? '新建文档' : 'New document',
+        subtitle: currentLang === 'zh' ? '先选择分类，然后输入文件名' : 'Choose a category, then enter a filename',
+        label: currentLang === 'zh' ? '目标分类' : 'Destination category',
+        type: 'select',
+        choices: categories,
+        icon: 'fa-file-circle-plus',
+        onSubmit: category => {
+            openKnowledgeDocumentEditor(category);
+            return null;
+        },
+    });
+}
+
+function openKnowledgeDocumentEditor(category) {
+    openKnowledgeDialog({
+        title: currentLang === 'zh' ? '新建文档' : 'New document',
+        subtitle: currentLang === 'zh' ? `保存到 ${category}` : `Save to ${category}`,
+        label: '',
+        hint: currentLang === 'zh' ? '文件名可省略 .md 后缀；保存后会自动同步索引。' : 'The .md suffix is optional. Index sync runs after saving.',
+        type: 'document',
+        category,
+        filename: '',
+        content: '',
+        icon: 'fa-file-circle-plus',
+        validate: value => {
+            if (!value.filename) return currentLang === 'zh' ? '文件名不能为空' : 'Filename is required';
+            if (/\.[^.]+$/i.test(value.filename) && !/\.md$/i.test(value.filename)) {
+                return currentLang === 'zh' ? '新建文档仅支持 .md 文件名' : 'New documents must be .md files';
+            }
+            if (!value.content.trim()) return currentLang === 'zh' ? '内容不能为空' : 'Content is required';
+            if (new Blob([value.content]).size > KNOWLEDGE_IMPORT_MAX_FILE_SIZE) {
+                return currentLang === 'zh' ? '内容不能超过 10MB' : 'Content cannot exceed 10MB';
+            }
+            return '';
+        },
+        onSubmit: value => {
+            const safeName = value.filename.endsWith('.md') ? value.filename : `${value.filename}.md`;
+            return dispatchKnowledgeAction('create_document', {
+                path: `${category}/${safeName}`,
+                content: value.content,
+                overwrite: false,
+            }, payload => payload?.path || `${category}/${safeName}`);
+        },
+    });
+}
+
+function selectKnowledgeImportFiles() {
+    const input = document.getElementById('knowledge-import-input');
+    input.value = '';
+    input.onchange = () => {
+        if (input.files && input.files.length) openKnowledgeImportDialog(Array.from(input.files));
+    };
+    input.click();
+}
+
+function openKnowledgeImportDialog(files) {
+    const validationError = validateKnowledgeImportFiles(files);
+    if (validationError) {
+        _setKnowledgeStatus(validationError, true);
+        return;
+    }
+    const choices = _knowledgeCategoryPaths(_knowledgeTreeData);
+    openKnowledgeDialog({
+        title: currentLang === 'zh' ? '导入文档' : 'Import documents',
+        subtitle: currentLang === 'zh' ? `已选择 ${files.length} 个文件` : `${files.length} file(s) selected`,
+        label: currentLang === 'zh' ? '目标分类' : 'Destination category',
+        hint: choices.length ? (currentLang === 'zh' ? '支持 Markdown 和 TXT，TXT 会转成 Markdown 文档' : 'Markdown and TXT are supported. TXT is converted to Markdown.') :
+            (currentLang === 'zh' ? '请先创建一个分类' : 'Create a category first'),
+        type: 'select',
+        choices,
+        icon: 'fa-file-arrow-up',
+        onSubmit: target => importKnowledgeDocuments(files, target),
+    });
+}
+
+async function importKnowledgeDocuments(files, targetCategory) {
+    const validationError = validateKnowledgeImportFiles(files);
+    if (validationError) {
+        _setKnowledgeStatus(validationError, true);
+        return null;
+    }
+    const supported = files.filter(file => /\.(md|txt)$/i.test(file.name || ''));
+    if (!supported.length) {
+        _setKnowledgeStatus(currentLang === 'zh' ? '请选择 .md 或 .txt 文件' : 'Choose .md or .txt files', true);
+        return null;
+    }
+    const formData = new FormData();
+    formData.append('target_category', targetCategory);
+    formData.append('conflict_strategy', 'rename');
+    supported.forEach(file => formData.append('files', file, file.name));
+    _setKnowledgeStatus(currentLang === 'zh' ? '正在导入...' : 'Importing...', false, true);
+    try {
+        const response = await fetch('/api/knowledge/import', { method: 'POST', body: formData });
+        const result = await response.json();
+        if (result.status !== 'success') {
+            _setKnowledgeStatus(result.message || (currentLang === 'zh' ? '导入失败' : 'Import failed'), true);
+            loadKnowledgeView();
+            return null;
+        }
+        _setKnowledgeStatus(_knowledgeResultMessage('import_documents', result.payload), false);
+        // Auto-open the first successfully imported document.
+        const firstImported = (result.payload?.results || []).find(item => item.status === 'imported');
+        loadKnowledgeView(firstImported ? firstImported.path : undefined);
+        return result.payload;
+    } catch (error) {
+        _setKnowledgeStatus(currentLang === 'zh' ? '导入请求失败' : 'Import request failed', true);
+        return null;
+    }
+}
+
+function validateKnowledgeImportFiles(files) {
+    if (!files || !files.length) return currentLang === 'zh' ? '请选择文件' : 'Choose files';
+    if (files.length > KNOWLEDGE_IMPORT_MAX_FILES) {
+        return currentLang === 'zh' ? `一次最多导入 ${KNOWLEDGE_IMPORT_MAX_FILES} 个文件` : `Import at most ${KNOWLEDGE_IMPORT_MAX_FILES} files at a time`;
+    }
+    let total = 0;
+    for (const file of files) {
+        total += file.size || 0;
+        if ((file.size || 0) > KNOWLEDGE_IMPORT_MAX_FILE_SIZE) {
+            return currentLang === 'zh' ? `${file.name} 超过 10MB` : `${file.name} exceeds 10MB`;
+        }
+    }
+    if (total > KNOWLEDGE_IMPORT_MAX_TOTAL_SIZE) {
+        return currentLang === 'zh' ? '单次导入总大小不能超过 200MB' : 'Total import size cannot exceed 200MB';
+    }
+    return '';
+}
+
+let _knowledgeImportDropReady = false;
+function initKnowledgeImportDropZone() {
+    if (_knowledgeImportDropReady) return;
+    const panel = document.getElementById('knowledge-panel-docs');
+    if (!panel) return;
+    _knowledgeImportDropReady = true;
+    ['dragenter', 'dragover'].forEach(name => {
+        panel.addEventListener(name, event => {
+            if (!event.dataTransfer || !event.dataTransfer.types.includes('Files')) return;
+            event.preventDefault();
+            panel.classList.add('knowledge-import-drag-over');
+        });
+    });
+    ['dragleave', 'drop'].forEach(name => {
+        panel.addEventListener(name, event => {
+            if (event.type === 'drop') {
+                event.preventDefault();
+                const files = Array.from(event.dataTransfer?.files || []);
+                if (files.length) openKnowledgeImportDialog(files);
+            }
+            panel.classList.remove('knowledge-import-drag-over');
+        });
+    });
+}
+
+function renameKnowledgeCategory(path) {
+    openKnowledgeDialog({
+        title: currentLang === 'zh' ? '重命名分类' : 'Rename category',
+        subtitle: path,
+        label: currentLang === 'zh' ? '新的分类路径' : 'New category path',
+        value: path,
+        icon: 'fa-pen',
+        validate: value => value === path ? (currentLang === 'zh' ? '请输入不同的分类路径' : 'Enter a different category path') : '',
+        onSubmit: newPath => dispatchKnowledgeAction('rename_category', {path, new_path: newPath}),
+    });
+}
+
+function deleteKnowledgeCategory(path) {
+    showConfirmDialog({
+        title: '删除分类',
+        message: `确认删除“${path}”及其中全部文档？`,
+        okText: t('confirm_yes'),
+        cancelText: t('confirm_cancel'),
+        onConfirm: () => dispatchKnowledgeAction('delete_category', {path, confirm: true}),
+    });
+}
+
+function deleteKnowledgeDocument(path) {
+    showConfirmDialog({
+        title: '删除文档',
+        message: `确认删除“${path}”？`,
+        okText: t('confirm_yes'),
+        cancelText: t('confirm_cancel'),
+        onConfirm: () => dispatchKnowledgeAction('delete_documents', {paths: [path]}),
+    });
+}
+
+function moveKnowledgeDocument(path) {
+    const currentCategory = path.includes('/') ? path.split('/').slice(0, -1).join('/') : '';
+    const choices = _knowledgeCategoryPaths(_knowledgeTreeData).filter(value => value !== currentCategory);
+    openKnowledgeDialog({
+        title: currentLang === 'zh' ? '移动文档' : 'Move document',
+        subtitle: path,
+        label: currentLang === 'zh' ? '目标分类' : 'Destination category',
+        hint: choices.length ? '' : (currentLang === 'zh' ? '请先创建其他分类' : 'Create another category first'),
+        type: 'select',
+        choices,
+        icon: 'fa-arrow-right-arrow-left',
+        onSubmit: target => dispatchKnowledgeAction('move_documents', {paths: [path], target_category: target}),
     });
 }
 
@@ -9588,6 +10375,9 @@ function showLoginScreen() {
     if (currentLang === 'en') {
         subtitle.textContent = 'Enter password to access the console';
         loginBtn.textContent = 'Login';
+    } else if (currentLang === 'zh-Hant') {
+        subtitle.textContent = '請輸入密碼以存取控制台';
+        loginBtn.textContent = '登入';
     } else {
         subtitle.textContent = '请输入密码以访问控制台';
         loginBtn.textContent = '登录';
@@ -9614,22 +10404,49 @@ function showLoginScreen() {
             if (data.status === 'success') {
                 overlay.classList.add('hidden');
                 document.getElementById('app').classList.remove('hidden');
+                const logoutBtn = document.getElementById('logout-btn-header');
+                if (logoutBtn) logoutBtn.classList.remove('hidden');
                 initApp();
             } else {
-                errEl.textContent = currentLang === 'zh' ? '密码错误' : 'Wrong password';
+                if (currentLang === 'zh-Hant') {
+                    errEl.textContent = '密碼錯誤';
+                } else if (currentLang === 'zh') {
+                    errEl.textContent = '密码错误';
+                } else {
+                    errEl.textContent = 'Wrong password';
+                }
                 errEl.classList.remove('hidden');
                 pwdInput.value = '';
                 pwdInput.focus();
             }
             btn.disabled = false;
         }).catch(() => {
-            errEl.textContent = currentLang === 'zh' ? '网络错误，请重试' : 'Network error, please retry';
+            if (currentLang === 'zh-Hant') {
+                errEl.textContent = '網路錯誤，請重試';
+            } else if (currentLang === 'zh') {
+                errEl.textContent = '网络错误，请重试';
+            } else {
+                errEl.textContent = 'Network error, please retry';
+            }
             errEl.classList.remove('hidden');
             btn.disabled = false;
         });
         return false;
     };
 }
+
+function handleLogout() {
+    fetch('/auth/logout', {
+        method: 'POST'
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'success') {
+            window.location.reload();
+        }
+    }).catch(() => {
+        window.location.reload();
+    });
+}
+window.handleLogout = handleLogout;
 
 // Intercept 401 responses globally to show login screen on session expiry
 const _originalFetch = window.fetch;
@@ -9676,6 +10493,10 @@ fetch('/auth/check').then(r => r.json()).then(data => {
     if (data.auth_required && !data.authenticated) {
         showLoginScreen();
     } else {
+        if (data.auth_required) {
+            const logoutBtn = document.getElementById('logout-btn-header');
+            if (logoutBtn) logoutBtn.classList.remove('hidden');
+        }
         initApp();
     }
 }).catch(() => {
@@ -9684,4 +10505,383 @@ fetch('/auth/check').then(r => r.json()).then(data => {
 
 requestAnimationFrame(() => {
     document.body.classList.add('transition-colors', 'duration-200');
+});
+
+// =====================================================================
+// Task Edit Modal
+// =====================================================================
+let currentEditingTask = null;
+
+function loadTaskChannelOptions(selectedChannelType) {
+    const select = document.getElementById('task-edit-channel-type');
+    select.innerHTML = '';
+    fetch('/api/channels').then(r => r.json()).then(data => {
+        if (data.status !== 'success') return;
+        const allChannels = data.channels || [];
+        // Only include currently active channels, strictly following the channel management page logic
+        let channels = allChannels.filter(c => c.active).map(c => {
+            const label = (typeof c.label === 'object') ? (c.label[currentLang] || c.label.en || c.name) : (c.label || c.name);
+            return { name: c.name, label: label };
+        });
+        const channelNames = channels.map(c => c.name);
+        // Always include the web console channel
+        if (!channelNames.includes('web')) {
+            channels.unshift({ name: 'web', label: currentLang === 'zh' ? 'Web' : 'Web' });
+        }
+        // If the currently selected channel is not in the active list (e.g. disabled), append it to preserve selection
+        if (selectedChannelType && !channelNames.includes(selectedChannelType) && selectedChannelType !== 'web') {
+            const ch = allChannels.find(c => c.name === selectedChannelType);
+            const label = ch
+                ? ((typeof ch.label === 'object') ? (ch.label[currentLang] || ch.label.en || ch.name) : (ch.label || ch.name))
+                : selectedChannelType;
+            channels.push({ name: selectedChannelType, label: label });
+        }
+        channels.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.name;
+            opt.textContent = c.label;
+            select.appendChild(opt);
+        });
+        // Set selected value
+        if (selectedChannelType) {
+            select.value = selectedChannelType;
+        }
+    }).catch(() => {
+        // fallback: at least keep the current selection and web
+        select.innerHTML = '';
+        const webOpt = document.createElement('option');
+        webOpt.value = 'web';
+        webOpt.textContent = 'Web';
+        select.appendChild(webOpt);
+
+        if (selectedChannelType && selectedChannelType !== 'web') {
+            const opt = document.createElement('option');
+            opt.value = selectedChannelType;
+            opt.textContent = selectedChannelType;
+            select.appendChild(opt);
+        }
+        if (selectedChannelType) {
+            select.value = selectedChannelType;
+        }
+
+        // Show error message
+        console.error('Failed to load channel options');
+    });
+}
+
+function openTaskEditModal(task) {
+    currentEditingTask = task;
+    const overlay = document.getElementById('task-edit-modal-overlay');
+    const titleEl = document.querySelector('#task-edit-modal-overlay h3');
+    const subtitle = document.getElementById('task-edit-modal-subtitle');
+    const deleteBtn = document.getElementById('task-edit-modal-delete');
+    const nameInput = document.getElementById('task-edit-name');
+    const enabledInput = document.getElementById('task-edit-enabled');
+    const scheduleTypeSelect = document.getElementById('task-edit-schedule-type');
+    const cronInput = document.getElementById('task-edit-cron-expression');
+    const intervalInput = document.getElementById('task-edit-interval-seconds');
+    const onceInput = document.getElementById('task-edit-once-time');
+    const actionTypeSelect = document.getElementById('task-edit-action-type');
+    const receiverInput = document.getElementById('task-edit-receiver');
+    const contentInput = document.getElementById('task-edit-content');
+
+    // Set title and subtitle
+    titleEl.textContent = t('task_edit_title');
+    subtitle.textContent = task.id;
+    deleteBtn.classList.remove('hidden');
+
+    // Populate data
+    nameInput.value = task.name || '';
+    enabledInput.checked = task.enabled !== false;
+
+    const schedule = task.schedule || {};
+    scheduleTypeSelect.value = schedule.type || 'cron';
+
+    // Clear all schedule type input values first to avoid stale data
+    cronInput.value = '';
+    intervalInput.value = '';
+    onceInput.value = '';
+
+    if (schedule.type === 'cron') {
+        cronInput.value = schedule.expression || '';
+    } else if (schedule.type === 'interval') {
+        intervalInput.value = schedule.seconds || '';
+    } else if (schedule.type === 'once') {
+        if (schedule.run_at) {
+            // Manually parse ISO time string to avoid cross-browser timezone issues with new Date()
+            // run_at format: "YYYY-MM-DDTHH:mm:ss" or "YYYY-MM-DDTHH:mm:ss.ffffff"
+            const parts = schedule.run_at.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+            if (parts) {
+                const timeInput = document.getElementById('task-edit-once-time');
+                timeInput.value = `${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${parts[6]}`;
+            }
+        }
+    }
+
+    const action = task.action || {};
+    actionTypeSelect.value = action.type || 'send_message';
+    receiverInput.value = action.receiver || '';
+    contentInput.value = action.content || action.task_description || '';
+
+    // Load channel options and set selected value
+    loadTaskChannelOptions(action.channel_type || 'web');
+
+    // Disable channel type selector — channel is read-only when editing.
+    // Switching the channel after a task is created is problematic because:
+    //   1. The WeChat (weixin/ilink) bot requires a valid context_token that is tied
+    //      to a specific user-session on that channel. Changing the channel to weixin
+    //      would invalidate the existing token — the new receiver on weixin may not
+    //      have an active context_token, causing the scheduled push to silently fail.
+    //   2. Other channels (DingTalk, Feishu, etc.) also carry channel-specific fields
+    //      (e.g. dingtalk_sender_staff_id) that cannot be trivially re-populated for
+    //      a different channel type without user intervention.
+    //   3. The receiver identity itself is channel-bound — a weixin user-id means
+    //      nothing on a Feishu channel, so changing the channel would orphan the task.
+    // For these reasons, the channel type is intentionally frozen once a task exists.
+    // Users who need a task on a different channel should create a new task through
+    // the chat interface (by asking the bot) rather than editing an existing one.
+    document.getElementById('task-edit-channel-type').disabled = true;
+
+    // Update UI
+    updateTaskScheduleFields();
+    updateTaskActionLabel();
+
+    overlay.classList.remove('hidden');
+}
+
+function closeTaskEditModal() {
+    document.getElementById('task-edit-modal-overlay').classList.add('hidden');
+    currentEditingTask = null;
+}
+
+function updateTaskScheduleFields() {
+    const scheduleType = document.getElementById('task-edit-schedule-type').value;
+    const cronWrap = document.getElementById('task-edit-cron-wrap');
+    const intervalWrap = document.getElementById('task-edit-interval-wrap');
+    const onceWrap = document.getElementById('task-edit-once-wrap');
+    const cronHint = document.getElementById('task-edit-cron-hint');
+    const intervalHint = document.getElementById('task-edit-interval-hint');
+
+    cronWrap.classList.toggle('hidden', scheduleType !== 'cron');
+    intervalWrap.classList.toggle('hidden', scheduleType !== 'interval');
+    onceWrap.classList.toggle('hidden', scheduleType !== 'once');
+
+    if (cronHint) cronHint.classList.toggle('hidden', scheduleType !== 'cron');
+    if (intervalHint) intervalHint.classList.toggle('hidden', scheduleType !== 'interval');
+}
+
+function updateTaskActionLabel() {
+    const actionType = document.getElementById('task-edit-action-type').value;
+    const label = document.getElementById('task-edit-content-label');
+    const content = document.getElementById('task-edit-content');
+
+    if (actionType === 'send_message') {
+        label.textContent = t('task_message_content');
+        content.placeholder = t('task_message_content');
+    } else {
+        label.textContent = t('task_task_description');
+        content.placeholder = t('task_task_description');
+    }
+}
+
+function saveTaskEdit() {
+    const nameInput = document.getElementById('task-edit-name');
+    const enabledInput = document.getElementById('task-edit-enabled');
+    const scheduleTypeSelect = document.getElementById('task-edit-schedule-type');
+    const cronInput = document.getElementById('task-edit-cron-expression');
+    const intervalInput = document.getElementById('task-edit-interval-seconds');
+    const onceInput = document.getElementById('task-edit-once-time');
+    const actionTypeSelect = document.getElementById('task-edit-action-type');
+    const channelTypeSelect = document.getElementById('task-edit-channel-type');
+    const receiverInput = document.getElementById('task-edit-receiver');
+    const contentInput = document.getElementById('task-edit-content');
+    const statusEl = document.getElementById('task-edit-modal-status');
+    const saveBtn = document.getElementById('task-edit-modal-save');
+
+    const name = nameInput.value.trim();
+    if (!name) {
+        statusEl.textContent = currentLang === 'zh' ? '请输入任务名称' : 'Please enter task name';
+        statusEl.style.opacity = '1';
+        setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+        return;
+    }
+
+    const scheduleType = scheduleTypeSelect.value;
+    const schedule = { type: scheduleType };
+
+    if (scheduleType === 'cron') {
+        const expr = cronInput.value.trim();
+        if (!expr) {
+            statusEl.textContent = currentLang === 'zh' ? '请输入 Cron 表达式' : 'Please enter cron expression';
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            return;
+        }
+        // Basic cron expression format validation: 5 or 6 fields
+        const fields = expr.split(/\s+/);
+        if (fields.length < 5 || fields.length > 6) {
+            statusEl.textContent = currentLang === 'zh' ? 'Cron 表达式格式错误，应为 5 或 6 个字段（分 时 日 月 周）' : 'Invalid cron expression, expected 5 or 6 fields (min hour day month weekday)';
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            return;
+        }
+        schedule.expression = expr;
+        // Note: detailed cron expression validity is verified by the backend croniter library; frontend only does basic format validation
+    } else if (scheduleType === 'interval') {
+        const seconds = parseInt(intervalInput.value);
+        if (!seconds || seconds < 60) {
+            statusEl.textContent = currentLang === 'zh' ? '间隔秒数最小为 60 秒' : 'Interval must be at least 60 seconds';
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            return;
+        }
+        schedule.seconds = seconds;
+    } else if (scheduleType === 'once') {
+        const time = onceInput.value;
+        if (!time) {
+            statusEl.textContent = currentLang === 'zh' ? '请选择执行时间' : 'Please select execution time';
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            return;
+        }
+        // Validate execution time format
+        const selectedTime = new Date(time);
+        if (isNaN(selectedTime.getTime())) {
+            statusEl.textContent = currentLang === 'zh' ? '执行时间格式错误' : 'Invalid execution time format';
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            return;
+        }
+        // Validate that time is in the future for one-time tasks
+        if (selectedTime <= new Date()) {
+            statusEl.textContent = currentLang === 'zh' ? '执行时间必须在当前时间之后' : 'Execution time must be in the future';
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            return;
+        }
+        // datetime-local value with step="1" is already in YYYY-MM-DDTHH:mm:ss format
+        // Backend _parse_naive_local treats strings without timezone suffix as local time
+        schedule.run_at = time;
+    }
+
+    const actionType = actionTypeSelect.value;
+    const channelType = channelTypeSelect.value;
+    const content = contentInput.value.trim();
+
+    if (!content) {
+        statusEl.textContent = currentLang === 'zh' ? '请输入内容' : 'Please enter content';
+        statusEl.style.opacity = '1';
+        setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+        return;
+    }
+
+    // Build action with only necessary fields to avoid stale data
+    const action = {
+        type: actionType,
+        channel_type: channelType,
+        receiver: '',
+        receiver_name: '',
+        is_group: false,
+        notify_session_id: ''
+    };
+
+    if (actionType === 'send_message') {
+        action.content = content;
+    } else {
+        action.task_description = content;
+    }
+
+    // Preserve the original receiver info (channel is read-only, so it never changes)
+    if (currentEditingTask && currentEditingTask.action) {
+        action.receiver = currentEditingTask.action.receiver || '';
+        action.receiver_name = currentEditingTask.action.receiver_name || '';
+        action.is_group = currentEditingTask.action.is_group || false;
+        action.notify_session_id = currentEditingTask.action.notify_session_id || '';
+
+        // Preserve channel-specific fields (e.g. DingTalk sender_staff_id)
+        if (channelType === 'dingtalk' && currentEditingTask.action.dingtalk_sender_staff_id) {
+            action.dingtalk_sender_staff_id = currentEditingTask.action.dingtalk_sender_staff_id;
+        }
+    }
+
+    saveBtn.disabled = true;
+
+    const payload = {
+        task_id: currentEditingTask.id,
+        name: name,
+        enabled: enabledInput.checked,
+        schedule: schedule,
+        action: action
+    };
+
+    fetch('/api/scheduler/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(r => r.json()).then(res => {
+        saveBtn.disabled = false;
+        if (res.status === 'success') {
+            closeTaskEditModal();
+            tasksLoaded = false;
+            loadTasksView();
+        } else {
+            statusEl.textContent = res.message || (currentLang === 'zh' ? '保存失败' : 'Save failed');
+            statusEl.style.opacity = '1';
+            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+        }
+    }).catch(() => {
+        saveBtn.disabled = false;
+        statusEl.textContent = currentLang === 'zh' ? '网络错误' : 'Network error';
+        statusEl.style.opacity = '1';
+        setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+    });
+}
+
+function deleteTask() {
+    if (!currentEditingTask) return;
+
+    const taskName = currentEditingTask.name || currentEditingTask.id || '未知任务';
+    const taskId = currentEditingTask.id;  // Capture early to avoid closure race condition
+    showConfirmDialog({
+        title: t('task_delete_confirm_title'),
+        message: (currentLang === 'zh' ? `确定要删除任务「${taskName}」吗？` : `Are you sure to delete task "${taskName}"?`),
+        onConfirm: () => {
+            fetch('/api/scheduler/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId })
+            }).then(r => r.json()).then(res => {
+                if (res.status === 'success') {
+                    closeTaskEditModal();
+                    tasksLoaded = false;
+                    loadTasksView();
+                } else {
+                    const statusEl = document.getElementById('task-edit-modal-status');
+                    if (statusEl) {
+                        statusEl.textContent = res.message || 'Delete failed';
+                        statusEl.classList.remove('hidden', 'text-green-500');
+                        statusEl.classList.add('text-red-500');
+                        setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+                    }
+                }
+            }).catch(() => {
+                const statusEl = document.getElementById('task-edit-modal-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Network error';
+                    statusEl.classList.remove('hidden', 'text-green-500');
+                    statusEl.classList.add('text-red-500');
+                    setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+                }
+            });
+        }
+    });
+}
+
+document.getElementById('task-edit-schedule-type').addEventListener('change', updateTaskScheduleFields);
+document.getElementById('task-edit-action-type').addEventListener('change', updateTaskActionLabel);
+document.getElementById('task-edit-modal-cancel').addEventListener('click', closeTaskEditModal);
+document.getElementById('task-edit-modal-save').addEventListener('click', saveTaskEdit);
+document.getElementById('task-edit-modal-delete').addEventListener('click', deleteTask);
+document.getElementById('task-edit-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeTaskEditModal();
 });

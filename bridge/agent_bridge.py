@@ -21,10 +21,10 @@ from models.openai_compatible_bot import OpenAICompatibleBot
 def add_openai_compatible_support(bot_instance):
     """
     Dynamically add OpenAI-compatible tool calling support to a bot instance.
-    
+
     This allows any bot to gain tool calling capability without modifying its code,
     as long as it uses OpenAI-compatible API format.
-    
+
     Note: Some bots like ZHIPUAIBot have native tool calling support and don't need enhancement.
     """
     if hasattr(bot_instance, 'call_with_tools'):
@@ -104,7 +104,7 @@ class AgentLLMModel(LLMModel):
         configured_bot_type = conf().get("bot_type")
         if configured_bot_type:
             return configured_bot_type
-       
+
         if not model_name or not isinstance(model_name, str):
             return const.OPENAI
         if model_name in self._MODEL_BOT_TYPE_MAP:
@@ -191,11 +191,11 @@ class AgentLLMModel(LLMModel):
                 # Fallback to regular call
                 # This would need to be implemented based on your specific needs
                 raise NotImplementedError("Regular call not implemented yet")
-                
+
         except Exception as e:
             logger.error(f"AgentLLMModel call error: {e}")
             raise
-    
+
     def call_stream(self, request: LLMRequest):
         """
         Call the model with streaming using COW's bot infrastructure
@@ -248,23 +248,23 @@ class AgentLLMModel(LLMModel):
                         kwargs['reasoning_effort'] = effort
 
                 stream = self.bot.call_with_tools(**kwargs)
-                
+
                 # Convert stream format to our expected format
                 for chunk in stream:
                     yield self._format_stream_chunk(chunk)
             else:
                 bot_type = type(self.bot).__name__
                 raise NotImplementedError(f"Bot {bot_type} does not support call_with_tools. Please add the method.")
-                
+
         except Exception as e:
             logger.error(f"AgentLLMModel call_stream error: {e}", exc_info=True)
             raise
-    
+
     def _format_response(self, response):
         """Format Claude response to our expected format"""
         # This would need to be implemented based on Claude's response format
         return response
-    
+
     def _format_stream_chunk(self, chunk):
         """Format Claude stream chunk to our expected format"""
         # This would need to be implemented based on Claude's stream format
@@ -276,14 +276,14 @@ class AgentBridge:
     Bridge class that integrates super Agent with COW
     Manages multiple agent instances per session for conversation isolation
     """
-    
+
     def __init__(self, bridge: Bridge):
         self.bridge = bridge
         self.agents = {}  # session_id -> Agent instance mapping
         self.default_agent = None  # For backward compatibility (no session_id)
         self.agent: Optional[Agent] = None
         self.scheduler_initialized = False
-        
+
         # Create helper instances
         self.initializer = AgentInitializer(bridge, self)
 
@@ -306,25 +306,25 @@ class AgentBridge:
     def create_agent(self, system_prompt: str, tools: List = None, **kwargs) -> Agent:
         """
         Create the super agent with COW integration
-        
+
         Args:
             system_prompt: System prompt
             tools: List of tools (optional)
             **kwargs: Additional agent parameters
-            
+
         Returns:
             Agent instance
         """
         # Create LLM model that uses COW's bot infrastructure
         model = AgentLLMModel(self.bridge)
-        
+
         # Default tools if none provided
         if tools is None:
             # Use ToolManager to load all available tools
             from agent.tools import ToolManager
             tool_manager = ToolManager()
             tool_manager.load_tools()
-            
+
             tools = []
             workspace_dir = kwargs.get("workspace_dir")
             for tool_name in tool_manager.tool_classes.keys():
@@ -336,7 +336,7 @@ class AgentBridge:
                         tools.append(tool)
                 except Exception as e:
                     logger.warning(f"[AgentBridge] Failed to load tool {tool_name}: {e}")
-        
+
         # Create agent instance
         agent = Agent(
             system_prompt=system_prompt,
@@ -359,14 +359,14 @@ class AgentBridge:
             logger.debug(f"[AgentBridge] SkillManager initialized with {len(agent.skill_manager.skills)} skills")
 
         return agent
-    
+
     def get_agent(self, session_id: str = None) -> Optional[Agent]:
         """
         Get agent instance for the given session
-        
+
         Args:
             session_id: Session identifier (e.g., user_id). If None, returns default agent.
-        
+
         Returns:
             Agent instance for this session
         """
@@ -375,18 +375,18 @@ class AgentBridge:
             if self.default_agent is None:
                 self._init_default_agent()
             return self.default_agent
-        
+
         # Check if agent exists for this session
         if session_id not in self.agents:
             self._init_agent_for_session(session_id)
-        
+
         return self.agents[session_id]
-    
+
     def _init_default_agent(self):
         """Initialize default super agent"""
         agent = self.initializer.initialize_agent(session_id=None)
         self.default_agent = agent
-    
+
     def _init_agent_for_session(self, session_id: str):
         """Initialize agent for a specific session"""
         agent = self.initializer.initialize_agent(session_id=session_id)
@@ -434,17 +434,17 @@ class AgentBridge:
         )
         return count
 
-    def agent_reply(self, query: str, context: Context = None, 
+    def agent_reply(self, query: str, context: Context = None,
                    on_event=None, clear_history: bool = False) -> Reply:
         """
         Use super agent to reply to a query
-        
+
         Args:
             query: User query
             context: COW context (optional, contains session_id for user isolation)
             on_event: Event callback (optional)
             clear_history: Whether to clear conversation history
-            
+
         Returns:
             Reply object
         """
@@ -470,14 +470,14 @@ class AgentBridge:
             agent = self.get_agent(session_id=session_id)
             if not agent:
                 return Reply(ReplyType.ERROR, "Failed to initialize super agent")
-            
+
             # Create event handler for logging and channel communication
             event_handler = AgentEventHandler(context=context, original_callback=on_event)
-            
+
             # Filter tools based on context
             original_tools = agent.tools
             filtered_tools = original_tools
-            
+
             # If this is a scheduled task execution, exclude scheduler tool to prevent recursion
             if context and context.get("is_scheduled_task"):
                 filtered_tools = [tool for tool in agent.tools if tool.name != "scheduler"]
@@ -494,7 +494,7 @@ class AgentBridge:
                             except Exception as e:
                                 logger.warning(f"[AgentBridge] Failed to attach context to scheduler: {e}")
                             break
-            
+
             # Pass context metadata to model for downstream API requests
             if context and hasattr(agent, 'model'):
                 agent.model.channel_type = context.get("channel_type", "")
@@ -524,6 +524,15 @@ class AgentBridge:
                 session_id, query, context, clear_history
             )
 
+            # Mark this session as mid-run so the self-evolution idle scan does
+            # not fire concurrently when a single turn runs longer than
+            # idle_minutes.
+            try:
+                from agent.evolution.trigger import mark_run_active
+                mark_run_active(agent, True)
+            except Exception:
+                pass
+
             try:
                 # Use agent's run_stream method with event handler
                 response = agent.run_stream(
@@ -533,6 +542,13 @@ class AgentBridge:
                     cancel_event=cancel_event,
                 )
             finally:
+                # Clear the mid-run flag so idle scans can review this session.
+                try:
+                    from agent.evolution.trigger import mark_run_active
+                    mark_run_active(agent, False)
+                except Exception:
+                    pass
+
                 # Restore original tools
                 if context and context.get("is_scheduled_task"):
                     agent.tools = original_tools
@@ -567,7 +583,7 @@ class AgentBridge:
                             logger.info(f"[AgentBridge] Cleared DB for recovered session: {session_id}")
                         except Exception as e:
                             logger.warning(f"[AgentBridge] Failed to clear DB after recovery: {e}")
-            
+
             # Record this user turn for the self-evolution idle trigger. Skip
             # scheduler-injected / scheduled-task sessions so internal runs do
             # not count as user activity.
@@ -598,15 +614,15 @@ class AgentBridge:
                     # Send the first file (for now, handle one file at a time)
                     file_info = files_to_send[0]
                     logger.info(f"[AgentBridge] Sending file: {file_info.get('path')}")
-                    
+
                     # Clear files_to_send for next request
                     agent.stream_executor.files_to_send = []
-                    
+
                     # Return file reply based on file type
                     return self._create_file_reply(file_info, response, context)
-            
+
             return Reply(ReplyType.TEXT, response)
-            
+
         except Exception as e:
             logger.error(f"Agent reply error: {e}")
             # If the agent cleared its messages due to format error / overflow,
@@ -628,7 +644,7 @@ class AgentBridge:
                 except Exception:
                     pass
             return Reply(ReplyType.ERROR, f"Agent error: {str(e)}")
-    
+
     def _schedule_mcp_hot_reload(self, agent):
         """
         Fire-and-forget: detect mcp.json edits and reconcile the agent's
@@ -657,18 +673,19 @@ class AgentBridge:
     def _create_file_reply(self, file_info: dict, text_response: str, context: Context = None) -> Reply:
         """
         Create a reply for sending files
-        
+
         Args:
             file_info: File metadata from read tool
             text_response: Text response from agent
             context: Context object
-            
+
         Returns:
             Reply object for file sending
         """
         file_type = file_info.get("file_type", "file")
         file_path = file_info.get("path")
-        
+
+
         # For images, use IMAGE_URL type (channel will handle upload)
         if file_type == "image":
             # Convert local path to file:// URL for channel processing
@@ -679,7 +696,7 @@ class AgentBridge:
             if text_response:
                 reply.text_content = text_response  # Store accompanying text
             return reply
-        
+
         # For all file types (document, video, audio), use FILE type
         if file_type in ["document", "video", "audio"]:
             file_url = f"file://{file_path}"
@@ -690,7 +707,7 @@ class AgentBridge:
             if text_response:
                 reply.text_content = text_response
             return reply
-        
+
         # For all other file types (tar.gz, zip, etc.), also use FILE type
         file_url = f"file://{file_path}"
         logger.info(f"[AgentBridge] Sending generic file: {file_url}")
@@ -699,7 +716,7 @@ class AgentBridge:
         if text_response:
             reply.text_content = text_response
         return reply
-    
+
     def _migrate_config_to_env(self, workspace_root: str):
         """
         Sync API keys from config.json to .env file.
@@ -710,7 +727,7 @@ class AgentBridge:
         """
         from config import conf
         import os
-        
+
         key_mapping = {
             "open_ai_api_key": "OPENAI_API_KEY",
             "open_ai_api_base": "OPENAI_API_BASE",
@@ -718,9 +735,9 @@ class AgentBridge:
             "claude_api_key": "CLAUDE_API_KEY",
             "linkai_api_key": "LINKAI_API_KEY",
         }
-        
+
         env_file = expand_path("~/.cow/.env")
-        
+
         # Read existing env vars (key -> value)
         existing_env_vars = {}
         if os.path.exists(env_file):
@@ -733,7 +750,7 @@ class AgentBridge:
                             existing_env_vars[key.strip()] = val.strip()
             except Exception as e:
                 logger.warning(f"[AgentBridge] Failed to read .env file: {e}")
-        
+
         # Sync config.json values into .env (add/update/remove)
         updated = False
         for config_key, env_key in key_mapping.items():
@@ -769,7 +786,7 @@ class AgentBridge:
                 logger.info(f"[AgentBridge] Synced API keys from config.json to .env")
             except Exception as e:
                 logger.warning(f"[AgentBridge] Failed to sync API keys: {e}")
-    
+
     def _pre_persist_user_message(
         self, session_id: str, query: str, context: Context, clear_history: bool
     ) -> bool:
@@ -1068,20 +1085,20 @@ class AgentBridge:
     def clear_session(self, session_id: str):
         """
         Clear a specific session's agent and conversation history
-        
+
         Args:
             session_id: Session identifier to clear
         """
         if session_id in self.agents:
             logger.info(f"[AgentBridge] Clearing session: {session_id}")
             del self.agents[session_id]
-    
+
     def clear_all_sessions(self):
         """Clear all agent sessions"""
         logger.info(f"[AgentBridge] Clearing all sessions ({len(self.agents)} total)")
         self.agents.clear()
         self.default_agent = None
-    
+
     def refresh_all_skills(self) -> int:
         """
         Refresh skills and conditional tools in all agent instances after

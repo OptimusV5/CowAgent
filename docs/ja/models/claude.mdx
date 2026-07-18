@@ -13,14 +13,14 @@ Claude は Anthropic が提供するモデルで、テキスト対話と画像�
 
 ```json
 {
-  "model": "claude-fable-5",
+  "model": "claude-sonnet-5",
   "claude_api_key": "YOUR_API_KEY"
 }
 ```
 
 | パラメータ | 説明 |
 | --- | --- |
-| `model` | `claude-fable-5`、`claude-opus-4-8`、`claude-opus-4-7`、`claude-sonnet-4-6`、`claude-opus-4-6`、`claude-sonnet-4-5`、`claude-sonnet-4-0`、`claude-3-5-sonnet-latest` などをサポート。詳細は [公式モデル一覧](https://docs.anthropic.com/en/docs/about-claude/models/overview) を参照 |
+| `model` | `claude-sonnet-5`、`claude-fable-5`、`claude-opus-4-8`、`claude-opus-4-7`、`claude-sonnet-4-6`、`claude-opus-4-6`、`claude-sonnet-4-5`、`claude-sonnet-4-0`、`claude-3-5-sonnet-latest` などをサポート。詳細は [公式モデル一覧](https://docs.anthropic.com/en/docs/about-claude/models/overview) を参照 |
 | `claude_api_key` | [Claude コンソール](https://console.anthropic.com/settings/keys) で作成 |
 | `claude_api_base` | 任意。デフォルトは `https://api.anthropic.com/v1`。サードパーティのプロキシに変更可能 |
 
@@ -28,8 +28,9 @@ Claude は Anthropic が提供するモデルで、テキスト対話と画像�
 
 | モデル | 用途 |
 | --- | --- |
-| `claude-fable-5` | 最新フラッグシップ。複雑な推論や長いタスクチェーンに最適。価格はやや高め |
-| `claude-opus-4-8` | 前世代フラッグシップ。性能とコストのバランスが良い |
+| `claude-sonnet-5` | 最新フラッグシップ。デフォルト推奨モデルで、推論性能とコストのバランスが最も良い |
+| `claude-fable-5` | Claude 5 シリーズのもう一つのフラッグシップモデル |
+| `claude-opus-4-8` | 前世代フラッグシップ。推論性能が最も高いが、価格は高め |
 | `claude-opus-4-7` | より以前の Opus フラッグシップ |
 | `claude-sonnet-4-6` | コストパフォーマンスと速度のバランスが良く、コストも低い |
 | `claude-opus-4-6` / `claude-sonnet-4-5` / `claude-sonnet-4-0` | より以前のフラッグシップ。価格はより安い |
@@ -44,7 +45,7 @@ Vision モデルを手動で指定したい場合は、設定ファイルで明�
 {
   "tools": {
     "vision": {
-      "model": "claude-sonnet-4-6"
+      "model": "claude-sonnet-5"
     }
   }
 }

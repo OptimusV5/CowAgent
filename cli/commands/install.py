@@ -4,7 +4,6 @@ import os
 import sys
 import subprocess
 from typing import Callable, Optional
-from urllib.parse import urlsplit, urlunsplit
 
 import click
 
@@ -12,7 +11,6 @@ PLAYWRIGHT_VERSION = "1.52.0"
 PLAYWRIGHT_LEGACY_VERSION = "1.28.0"
 GLIBC_THRESHOLD = (2, 28)
 CHINA_MIRROR = "https://registry.npmmirror.com/-/binary/playwright"
-SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
 
 # stream(msg, fg=None) — fg is "yellow" | "green" | "red" | None
 StreamFn = Callable[[str, Optional[str]], None]
@@ -79,53 +77,6 @@ def _is_china_network() -> bool:
         return False
 
 
-def _normalize_download_proxy(value: str) -> str:
-    proxy = str(value or "").strip()
-    if not proxy:
-        return ""
-    parsed = urlsplit(proxy)
-    scheme = parsed.scheme.lower()
-    if scheme not in SUPPORTED_PROXY_SCHEMES:
-        raise ValueError("proxy scheme must be one of: http, https, socks5, socks5h")
-    if not parsed.hostname:
-        raise ValueError("proxy host is required")
-    try:
-        port = parsed.port
-    except ValueError as e:
-        raise ValueError("proxy port must be a valid integer between 1 and 65535") from e
-    if port is None:
-        raise ValueError("proxy port is required")
-    if not (1 <= port <= 65535):
-        raise ValueError("proxy port must be between 1 and 65535")
-    return urlunsplit((scheme, parsed.netloc, parsed.path or "", parsed.query or "", parsed.fragment or ""))
-
-
-def _mask_proxy_url(value: str) -> str:
-    proxy = str(value or "").strip()
-    if not proxy:
-        return ""
-    try:
-        parsed = urlsplit(proxy)
-        if parsed.password is None:
-            return proxy
-        username = parsed.username or ""
-        host = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port else ""
-        auth = f"{username}:****@" if username else "****@"
-        return urlunsplit((parsed.scheme, f"{auth}{host}{port}", parsed.path or "", parsed.query or "", parsed.fragment or ""))
-    except Exception:
-        return proxy
-
-
-def _download_env(proxy: str = "") -> dict:
-    env = os.environ.copy()
-    normalized = _normalize_download_proxy(proxy)
-    if normalized:
-        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-            env[key] = normalized
-    return env
-
-
 def _pip_install(package_spec: str, stream: StreamFn) -> int:
     """Install a package, preferring prebuilt wheels; retry with --user on perm error."""
     python = sys.executable
@@ -135,6 +86,12 @@ def _pip_install(package_spec: str, stream: StreamFn) -> int:
         stream("  Retrying with --user flag...", "yellow")
         ret = subprocess.call(base + ["--user", package_spec])
     return ret
+
+
+def _playwright_cli(args: list, env: Optional[dict] = None) -> int:
+    """Invoke the Playwright CLI with the active Python interpreter."""
+    cmd = [sys.executable, "-m", "playwright"] + args
+    return subprocess.call(cmd, env=env)
 
 
 def _default_stream(msg: str, fg: Optional[str] = None) -> None:
@@ -152,39 +109,6 @@ def _default_stream(msg: str, fg: Optional[str] = None) -> None:
 def run_install_browser(
     stream: Optional[StreamFn] = None,
     on_phase: Optional[PhaseFn] = None,
-    engine: str = "playwright",
-    proxy: str = "",
-) -> int:
-    engine = (engine or "playwright").strip().lower()
-    try:
-        proxy = _normalize_download_proxy(proxy)
-    except ValueError as e:
-        stream = stream or _default_stream
-        stream(str(e), "red")
-        return 1
-    if engine in ("playwright", "chromium"):
-        return run_install_playwright_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
-    if engine == "camofox":
-        return run_install_camofox_browser(stream=stream, on_phase=on_phase)
-    if engine == "camoufox":
-        return run_install_camoufox_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
-    if engine == "all":
-        ret = run_install_playwright_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
-        if ret != 0:
-            return ret
-        ret = run_install_camofox_browser(stream=stream, on_phase=on_phase)
-        if ret != 0:
-            return ret
-        return run_install_camoufox_browser(stream=stream, on_phase=on_phase, download_proxy=proxy)
-    stream = stream or _default_stream
-    stream(f"Unknown browser engine: {engine}", "red")
-    return 1
-
-
-def run_install_playwright_browser(
-    stream: Optional[StreamFn] = None,
-    on_phase: Optional[PhaseFn] = None,
-    download_proxy: str = "",
 ) -> int:
     """
     Install Playwright Python package, optional Linux deps, and Chromium.
@@ -211,7 +135,6 @@ def run_install_playwright_browser(
     stream = stream or _default_stream
     python = sys.executable
     legacy_mode = False
-
     _phase(on_phase, _t(
         "🔧 开始安装浏览器工具依赖（约几分钟，请耐心等待）…",
         "🔧 Installing browser tool dependencies (a few minutes, please wait)…",
@@ -271,13 +194,33 @@ def run_install_playwright_browser(
         f"✅ [1/3] Playwright package installed ({installed or target_version}).",
     ))
 
+    # With playwright available, prefer the user's system Chrome/Edge: the browser
+    # tool drives it directly (channel="chrome"/"msedge"), so we can skip the heavy
+    # ~150MB Chromium download entirely. Headless Linux servers, which usually
+    # lack a system browser, fall through to the download below. Honors
+    # prefer_system_browser via resolve_engine, so users who force downloaded
+    # Chromium still get it.
+    try:
+        from agent.tools.browser import browser_env
+        summary = browser_env.capability_summary()
+        if summary.get("ready") and summary.get("engine", {}).get("mode") == "system-chrome":
+            sc = summary.get("system_chrome") or {}
+            stream(f"System browser detected ({sc.get('channel')}), skipping Chromium download.", "green")
+            _phase(on_phase, _t(
+                f"✅ 检测到系统浏览器（{sc.get('channel')}），无需下载 Chromium，浏览器工具已就绪。",
+                f"✅ Detected system browser ({sc.get('channel')}); no Chromium download needed, browser tool is ready.",
+            ))
+            return 0
+    except Exception as e:
+        stream(f"  (system browser probe skipped: {e})", None)
+
     if sys.platform == "linux":
         _phase(on_phase, _t(
             "🔧 [2/3] 正在安装 Linux 系统依赖与轻量中文字体（文泉驿正黑，部分步骤可能需要 sudo）…",
             "🔧 [2/3] Installing Linux system deps and a lightweight CJK font (WenQuanYi Zen Hei; some steps may need sudo)…",
         ))
         stream("[2/3] Installing system dependencies (Linux)...", "yellow")
-        ret = subprocess.call([python, "-m", "playwright", "install-deps", "chromium"])
+        ret = _playwright_cli(["install-deps", "chromium"])
         if ret != 0:
             stream(
                 "  Could not auto-install system deps (may need sudo).\n"
@@ -320,21 +263,27 @@ def run_install_playwright_browser(
         "🌐 [3/3] Downloading and installing Chromium (large download, please wait)…",
     ))
     stream("[3/3] Installing Chromium browser...", "yellow")
-    cmd = [python, "-m", "playwright", "install", "chromium"]
+    pw_args = ["install", "chromium"]
 
     if _is_headless_linux() and not legacy_mode:
         ver = _version_tuple(installed or "")
         if ver >= (1, 57, 0):
-            cmd.append("--only-shell")
+            pw_args.append("--only-shell")
             stream("  (headless shell for Linux server)", None)
         else:
             stream("  (full Chromium)", None)
     elif sys.platform == "linux" and _has_display():
         stream("  (full browser for Linux desktop)", None)
 
-    env = _download_env(download_proxy)
-    if download_proxy:
-        stream(f"  (browser download proxy: {_mask_proxy_url(download_proxy)})", None)
+    env = os.environ.copy()
+    # Pin the download location to what the runtime looks up.
+    try:
+        from agent.tools.browser.browser_env import browsers_download_dir
+        env["PLAYWRIGHT_BROWSERS_PATH"] = browsers_download_dir()
+        stream(f"  (browsers dir: {env['PLAYWRIGHT_BROWSERS_PATH']})", None)
+    except Exception:
+        pass
+
     use_mirror = _is_china_network()
     if use_mirror:
         env["PLAYWRIGHT_DOWNLOAD_HOST"] = CHINA_MIRROR
@@ -344,7 +293,7 @@ def run_install_playwright_browser(
             "📡 Detected a China pip mirror; Chromium will be downloaded from the China mirror first.",
         ))
 
-    ret = subprocess.call(cmd, env=env)
+    ret = _playwright_cli(pw_args, env=env)
 
     if ret != 0 and use_mirror:
         stream("  Mirror download failed, retrying with official CDN...", "yellow")
@@ -352,9 +301,9 @@ def run_install_playwright_browser(
             "⚠️ 镜像下载失败，正在改用官方源重试…",
             "⚠️ Mirror download failed; retrying with the official CDN…",
         ))
-        env_no_mirror = _download_env(download_proxy)
+        env_no_mirror = dict(env)
         env_no_mirror.pop("PLAYWRIGHT_DOWNLOAD_HOST", None)
-        ret = subprocess.call(cmd, env=env_no_mirror)
+        ret = _playwright_cli(pw_args, env=env_no_mirror)
 
     if ret != 0:
         stream("Failed to install Chromium.", "red")
@@ -393,157 +342,9 @@ def run_install_playwright_browser(
     return 0
 
 
-def _node_major_version() -> int:
-    try:
-        out = subprocess.check_output(["node", "--version"], stderr=subprocess.DEVNULL)
-        ver = out.decode().strip().lstrip("v")
-        return int(ver.split(".", 1)[0])
-    except Exception:
-        return 0
-
-
-def run_install_camofox_browser(
-    stream: Optional[StreamFn] = None,
-    on_phase: Optional[PhaseFn] = None,
-) -> int:
-    """Install camofox-browser under ~/.cow/browser/camofox."""
-    from cli.utils import get_cli_language
-
-    get_cli_language()
-    from common import i18n
-    from common.utils import expand_path
-    _t = i18n.t
-
-    stream = stream or _default_stream
-    install_dir = expand_path("~/.cow/browser/camofox")
-
-    _phase(on_phase, _t(
-        "🦊 开始安装 Camofox 浏览器后端…",
-        "🦊 Installing Camofox browser backend…",
-    ))
-
-    node_major = _node_major_version()
-    if node_major < 22:
-        stream(
-            "Camofox requires Node.js >= 22. Install Node.js 22+ and retry.",
-            "red",
-        )
-        _phase(on_phase, _t(
-            "❌ Camofox 需要 Node.js 22 或更高版本。",
-            "❌ Camofox requires Node.js 22 or newer.",
-        ))
-        return 1
-
-    try:
-        subprocess.check_call(["npm", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        stream("npm is required to install camofox-browser.", "red")
-        return 1
-
-    os.makedirs(install_dir, exist_ok=True)
-    package_json = os.path.join(install_dir, "package.json")
-    if not os.path.exists(package_json):
-        with open(package_json, "w", encoding="utf-8") as f:
-            f.write('{"private":true,"dependencies":{}}\n')
-
-    _phase(on_phase, _t(
-        "📦 正在安装 @askjo/camofox-browser（首次会下载 Camoufox 浏览器内核）…",
-        "📦 Installing @askjo/camofox-browser (first run downloads Camoufox)…",
-    ))
-    stream(f"Installing @askjo/camofox-browser into {install_dir}...", "yellow")
-    ret = subprocess.call(["npm", "install", "@askjo/camofox-browser"], cwd=install_dir)
-    if ret != 0:
-        stream("Failed to install @askjo/camofox-browser.", "red")
-        return 1
-
-    bin_path = os.path.join(install_dir, "node_modules", ".bin", "camofox-browser")
-    if not os.path.exists(bin_path):
-        stream("camofox-browser installed, but executable was not found.", "yellow")
-    else:
-        stream(f"  executable: {bin_path}", "green")
-
-    _phase(on_phase, _t(
-        "✅ Camofox 浏览器后端已安装。",
-        "✅ Camofox browser backend installed.",
-    ))
-    stream("")
-    stream("Camofox backend ready. Use `cow browser switch camofox` to enable it.", "green")
-    return 0
-
-
-def run_install_camoufox_browser(
-    stream: Optional[StreamFn] = None,
-    on_phase: Optional[PhaseFn] = None,
-    download_proxy: str = "",
-) -> int:
-    """Install daijro/camoufox Python package and fetch its browser runtime."""
-    from cli.utils import get_cli_language
-
-    get_cli_language()
-    from common import i18n
-    _t = i18n.t
-
-    stream = stream or _default_stream
-    python = sys.executable
-
-    _phase(on_phase, _t(
-        "🦊 开始安装 Camoufox Python 浏览器后端…",
-        "🦊 Installing Camoufox Python browser backend…",
-    ))
-
-    stream("[1/2] Installing camoufox Python package...", "yellow")
-    ret = _pip_install("camoufox", stream)
-    if ret != 0:
-        stream("Failed to install camoufox package.", "red")
-        _phase(on_phase, _t("❌ Camoufox Python 包安装失败。", "❌ Failed to install Camoufox Python package."))
-        return 1
-
-    _phase(on_phase, _t(
-        "🌐 [2/2] 正在下载 Camoufox 浏览器内核…",
-        "🌐 [2/2] Downloading Camoufox browser runtime…",
-    ))
-    stream("[2/2] Fetching Camoufox browser runtime...", "yellow")
-    if download_proxy:
-        stream(f"  (browser download proxy: {_mask_proxy_url(download_proxy)})", None)
-    ret = subprocess.call([python, "-m", "camoufox", "fetch"], env=_download_env(download_proxy))
-    if ret != 0:
-        stream("Failed to fetch Camoufox browser runtime.", "red")
-        stream("Run manually: python3 -m camoufox fetch", "yellow")
-        return 1
-
-    ret = subprocess.call(
-        [python, "-c", "from camoufox.sync_api import Camoufox; print('OK')"],
-        stderr=subprocess.DEVNULL,
-    )
-    if ret != 0:
-        stream("  Warning: Camoufox import verification failed.", "yellow")
-    else:
-        stream("  Verification passed.", "green")
-
-    _phase(on_phase, _t(
-        "✅ Camoufox Python 浏览器后端已安装。",
-        "✅ Camoufox Python browser backend installed.",
-    ))
-    stream("")
-    stream("Camoufox backend ready. Use `cow browser switch camoufox` to enable it.", "green")
-    return 0
-
-
 @click.command("install-browser")
-@click.option(
-    "--engine",
-    type=click.Choice(["playwright", "camofox", "camoufox", "all"], case_sensitive=False),
-    default="playwright",
-    show_default=True,
-    help="Browser backend to install.",
-)
-@click.option(
-    "--proxy",
-    default="",
-    help="Proxy for browser runtime downloads only, e.g. socks5h://127.0.0.1:1080. Does not affect pip or npm.",
-)
-def install_browser(engine, proxy):
-    """Install browser tool dependencies."""
-    code = run_install_browser(engine=engine, proxy=proxy)
+def install_browser():
+    """Install browser tool dependencies (Playwright + Chromium)."""
+    code = run_install_browser()
     if code != 0:
         raise SystemExit(code)

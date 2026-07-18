@@ -18,12 +18,6 @@ Control a Chromium browser for web navigation, element interaction and content e
     - Install system dependencies on Linux
     - Download the Chromium browser (Linux servers automatically use the headless build)
     - Detect China-mainland networks and use mirror acceleration
-
-    To proxy only the browser runtime download:
-    ```bash
-    cow install-browser --proxy socks5h://127.0.0.1:1080
-    ```
-    This does not affect pip or npm.
   </Tab>
   <Tab title="Manual install">
     ```bash
@@ -111,6 +105,15 @@ You can override it in `config.json`:
 }
 ```
 
+## Browser Engine
+
+The browser engine is selected automatically, no configuration needed:
+
+1. If **Google Chrome / Edge** is detected on the machine, it drives the system browser directly, with **no Chromium download**, using real browser fingerprints;
+2. Otherwise it falls back to the Chromium engine downloaded into `~/.cow` via `install-browser`.
+
+Both use the persistent login below and behave identically.
+
 ## Persistent Login
 
 **Log in to a target site once and the Agent can keep using it.** Two ways are supported:
@@ -176,39 +179,3 @@ Then point the Agent at the endpoint in `config.json`:
 <Note>
   Chrome 137+ requires `--remote-debugging-port` to be paired with a dedicated `--user-data-dir`. As a result, the CDP-launched Chrome **cannot directly reuse the login state of your daily Chrome**; you'll need to log in once inside this dedicated profile.
 </Note>
-
-### Option 3: Camoufox backend
-
-To replace the Playwright Chromium backend, use the daijro/camoufox Python Playwright-compatible backend. Install it with:
-
-```bash
-cow install-browser --engine camoufox
-```
-
-Example config:
-
-```json
-{
-  "tools": {
-    "browser": {
-      "engine": "camoufox",
-      "proxy_default": false,
-      "camoufox": {
-        "persistent": true,
-        "user_data_dir": "~/.cow/camoufox_profile",
-        "proxy": "socks5h://127.0.0.1:1080",
-        "idle_timeout": 10,
-        "humanize": true,
-        "geoip": false,
-        "os": ""
-      }
-    }
-  }
-}
-```
-
-`proxy_default` controls whether the saved `camoufox.proxy` is applied at browser launch. When `false` (default), page traffic stays direct unless the agent passes `use_proxy: true` on a `browser` tool call — for example when navigating to sites blocked or unreachable from mainland China. This only enables the proxy already saved in config — arbitrary proxy URLs are not accepted at runtime.
-
-`backend_proxy` (top-level under `tools.browser`) is separate: it proxies CowAgent's HTTP calls to the Camofox REST API, not Camoufox page traffic.
-
-`camofox` is the existing Camofox REST backend, while `camoufox` is the Python package backend. Their configs are separate.
