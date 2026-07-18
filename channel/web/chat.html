@@ -560,11 +560,23 @@
                                         </div>
                                         <div>
                                             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_model_proxy">模型 API 代理</label>
-                                            <input id="cfg-model-proxy" type="text" autocomplete="off" spellcheck="false"
-                                                   class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
-                                                          bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
-                                                          focus:outline-none focus:border-primary-500 font-mono transition-colors"
-                                                   placeholder="socks5h://127.0.0.1:1080">
+                                            <div class="relative">
+                                                <input id="cfg-model-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                       data-clear-button="cfg-model-proxy-clear"
+                                                       class="w-full px-3 py-2 pr-10 rounded-lg border border-slate-200 dark:border-slate-600
+                                                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                       placeholder="socks5h://127.0.0.1:1080">
+                                                <button id="cfg-model-proxy-clear" type="button"
+                                                        class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400
+                                                               hover:text-red-500 dark:hover:text-red-400 cursor-pointer transition-colors"
+                                                        data-i18n-title="config_clear_saved_proxy"
+                                                        data-i18n-aria-label="config_clear_saved_proxy"
+                                                        title="清除已保存代理" aria-label="清除已保存代理"
+                                                        onclick="clearSecretInput('cfg-model-proxy')">
+                                                    <i class="fas fa-times text-xs"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                         <!-- Save Model Button -->
                                         <div class="flex items-center justify-end gap-3 pt-1">
@@ -737,11 +749,23 @@
                                         </div>
                                         <div id="cfg-browser-backend-proxy-wrap">
                                             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_browser_backend_proxy">浏览器后端代理</label>
-                                            <input id="cfg-browser-backend-proxy" type="text" autocomplete="off" spellcheck="false"
-                                                   class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
-                                                          bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
-                                                          focus:outline-none focus:border-primary-500 font-mono transition-colors"
-                                                   placeholder="socks5h://127.0.0.1:1080">
+                                            <div class="relative">
+                                                <input id="cfg-browser-backend-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                       data-clear-button="cfg-browser-backend-proxy-clear"
+                                                       class="w-full px-3 py-2 pr-10 rounded-lg border border-slate-200 dark:border-slate-600
+                                                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                              focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                       placeholder="socks5h://127.0.0.1:1080">
+                                                <button id="cfg-browser-backend-proxy-clear" type="button"
+                                                        class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400
+                                                               hover:text-red-500 dark:hover:text-red-400 cursor-pointer transition-colors"
+                                                        data-i18n-title="config_clear_saved_proxy"
+                                                        data-i18n-aria-label="config_clear_saved_proxy"
+                                                        title="清除已保存代理" aria-label="清除已保存代理"
+                                                        onclick="clearSecretInput('cfg-browser-backend-proxy')">
+                                                    <i class="fas fa-times text-xs"></i>
+                                                </button>
+                                            </div>
                                             <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_backend_proxy_hint">用于 CowAgent 连接 Camofox REST API，不影响浏览器页面访问外网。</p>
                                         </div>
                                         <div id="cfg-browser-camoufox" class="space-y-4 hidden">
@@ -756,11 +780,23 @@
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">Browser Proxy</label>
-                                                    <input id="cfg-camoufox-proxy" type="text" autocomplete="off" spellcheck="false"
-                                                           class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
-                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
-                                                                  focus:outline-none focus:border-primary-500 font-mono transition-colors"
-                                                           placeholder="socks5h://127.0.0.1:1080">
+                                                    <div class="relative">
+                                                        <input id="cfg-camoufox-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                               data-clear-button="cfg-camoufox-proxy-clear"
+                                                               class="w-full px-3 py-2 pr-10 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                               placeholder="socks5h://127.0.0.1:1080">
+                                                        <button id="cfg-camoufox-proxy-clear" type="button"
+                                                                class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400
+                                                                       hover:text-red-500 dark:hover:text-red-400 cursor-pointer transition-colors"
+                                                                data-i18n-title="config_clear_saved_proxy"
+                                                                data-i18n-aria-label="config_clear_saved_proxy"
+                                                                title="清除已保存代理" aria-label="清除已保存代理"
+                                                                onclick="clearSecretInput('cfg-camoufox-proxy')">
+                                                            <i class="fas fa-times text-xs"></i>
+                                                        </button>
+                                                    </div>
                                                     <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_browser_camoufox_proxy_hint">用于 Camoufox 浏览器页面访问外网。默认不启用，需 agent 传 use_proxy 或开启下方默认启用。</p>
                                                 </div>
                                             </div>
@@ -969,11 +1005,23 @@
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_video_proxy">代理</label>
-                                                    <input id="cfg-video-proxy" type="text" autocomplete="off" spellcheck="false"
-                                                           class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
-                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
-                                                                  focus:outline-none focus:border-primary-500 font-mono transition-colors"
-                                                           placeholder="socks5h://127.0.0.1:1080">
+                                                    <div class="relative">
+                                                        <input id="cfg-video-proxy" type="text" autocomplete="off" spellcheck="false"
+                                                               data-clear-button="cfg-video-proxy-clear"
+                                                               class="w-full px-3 py-2 pr-10 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                                                                      focus:outline-none focus:border-primary-500 font-mono transition-colors"
+                                                               placeholder="socks5h://127.0.0.1:1080">
+                                                        <button id="cfg-video-proxy-clear" type="button"
+                                                                class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400
+                                                                       hover:text-red-500 dark:hover:text-red-400 cursor-pointer transition-colors"
+                                                                data-i18n-title="config_clear_saved_proxy"
+                                                                data-i18n-aria-label="config_clear_saved_proxy"
+                                                                title="清除已保存代理" aria-label="清除已保存代理"
+                                                                onclick="clearSecretInput('cfg-video-proxy')">
+                                                            <i class="fas fa-times text-xs"></i>
+                                                        </button>
+                                                    </div>
                                                     <p class="mt-1.5 text-xs text-slate-400 dark:text-slate-500" data-i18n="config_video_proxy_hint">Gemini API 会使用该代理；yt-dlp 默认不使用代理，只对下方选中的站点使用。</p>
                                                 </div>
                                                 <div>

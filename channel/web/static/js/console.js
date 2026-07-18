@@ -216,6 +216,7 @@ const I18N = {
         config_language: '语言', config_language_hint: '界面展示、命令文案、系统提示词等使用的语言（与右上角切换同步）',
         config_model_advanced: '高级配置',
         config_model_proxy: '模型 API 代理',
+        config_clear_saved_proxy: '清除已保存代理',
         config_channel: '通道配置',
         config_agent_enabled: 'Agent 模式',
         config_max_tokens: '最大上下文 Token', config_max_tokens_hint: '对话中 Agent 能输入的最大 Token 长度，超过后会智能压缩处理',
@@ -521,6 +522,7 @@ const I18N = {
         config_language: 'Language', config_language_hint: 'Language for the UI, command text, system prompts and more (synced with the top-right switch)',
         config_model_advanced: 'Advanced',
         config_model_proxy: 'Model API Proxy',
+        config_clear_saved_proxy: 'Clear saved proxy',
         config_channel: 'Channel Configuration',
         config_agent_enabled: 'Agent Mode',
         config_max_tokens: 'Max Context Tokens', config_max_tokens_hint: 'Max tokens the Agent can input per conversation, auto-compressed when exceeded',
@@ -665,6 +667,12 @@ function applyI18n() {
     });
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
         el.placeholder = t(el.dataset['i18nPlaceholder']);
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        el.title = t(el.dataset.i18nTitle);
+    });
+    document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+        el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
     });
     document.querySelectorAll('[data-tip-key]').forEach(el => {
         el.setAttribute('data-tooltip', t(el.dataset.tipKey));
@@ -4642,8 +4650,11 @@ function initSecretInput(input, maskedValue) {
     input.value = masked;
     input.dataset.masked = masked ? '1' : '';
     input.dataset.maskedVal = masked;
+    input.dataset.secretDirty = '';
+    input.dataset.clearRequested = '';
     input.classList.toggle('cfg-key-masked', !!masked);
     input.placeholder = masked ? '••••••••' : originalPlaceholder;
+    syncSecretClearButton(input);
 
     if (!input._cfgSecretBound) {
         input.addEventListener('focus', function() {
@@ -4654,17 +4665,45 @@ function initSecretInput(input, maskedValue) {
             }
         });
         input.addEventListener('blur', function() {
-            if (!this.value.trim() && this.dataset.maskedVal) {
+            const untouched = this.dataset.secretDirty !== '1' && this.dataset.clearRequested !== '1';
+            if (!this.value.trim() && this.dataset.maskedVal && untouched) {
                 this.value = this.dataset.maskedVal;
                 this.dataset.masked = '1';
                 this.classList.add('cfg-key-masked');
             }
+            syncSecretClearButton(this);
         });
         input.addEventListener('input', function() {
             this.dataset.masked = '';
+            this.dataset.secretDirty = '1';
+            this.dataset.clearRequested = '';
+            this.classList.remove('cfg-key-masked');
+            syncSecretClearButton(this);
         });
         input._cfgSecretBound = true;
     }
+}
+
+function syncSecretClearButton(input) {
+    if (!input || !input.dataset.clearButton) return;
+    const button = document.getElementById(input.dataset.clearButton);
+    if (!button) return;
+    const hasValue = input.dataset.masked === '1' || !!input.value.trim();
+    button.classList.toggle('hidden', !hasValue);
+    button.disabled = !hasValue;
+}
+
+function clearSecretInput(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.value = '';
+    input.dataset.masked = '';
+    input.dataset.secretDirty = '1';
+    input.dataset.clearRequested = '1';
+    input.classList.remove('cfg-key-masked');
+    input.placeholder = input.dataset.placeholder || input.getAttribute('placeholder') || '';
+    syncSecretClearButton(input);
+    input.focus();
 }
 
 function updateBrowserBackendVisibility(engine) {
